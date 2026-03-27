@@ -75,24 +75,33 @@ export function ClienteDashboard({ leads }: { leads: Lead[] }) {
       .map(([name, value]) => ({ name, value }));
 
     const byDate: Record<string, number> = {};
+    const byDateLabel: Record<string, string> = {};
     for (const l of leads) {
       const raw = l.data ?? "";
       const dmy = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
       const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      let label = "";
-      if (dmy)      label = `${dmy[1]}/${dmy[2]}`;
-      else if (ymd) label = `${ymd[3]}/${ymd[2]}`;
-      else          label = "—";
-      const sortKey = dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : ymd ? raw.slice(0, 10) : "9999-99-99";
+      let label: string;
+      let sortKey: string;
+      if (dmy) {
+        // dd/mm/yyyy → label "dd/mm/yy", sortKey "yyyy-mm-dd"
+        label   = `${dmy[1]}/${dmy[2]}/${dmy[3].slice(2)}`;
+        sortKey = `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+      } else if (ymd) {
+        // yyyy-mm-dd → label "dd/mm/yy", sortKey "yyyy-mm-dd"
+        label   = `${ymd[3]}/${ymd[2]}/${ymd[1].slice(2)}`;
+        sortKey = raw.slice(0, 10);
+      } else {
+        label   = "—";
+        sortKey = "9999-99-99";
+      }
       if (!byDate[sortKey]) byDate[sortKey] = 0;
       byDate[sortKey]++;
-      (byDate as Record<string, unknown>)[`__lbl_${sortKey}`] = label;
+      byDateLabel[sortKey] = label;
     }
     const leadsPorData = Object.keys(byDate)
-      .filter(k => !k.startsWith("__lbl_"))
       .sort()
       .map(k => ({
-        data: (byDate as Record<string, unknown>)[`__lbl_${k}`] as string,
+        data: String(byDateLabel[k] ?? k),   // sempre string primitiva
         leads: byDate[k],
         _sortKey: k,
       }));
@@ -236,4 +245,3 @@ export function ClienteDashboard({ leads }: { leads: Lead[] }) {
     </div>
   );
 }
-
