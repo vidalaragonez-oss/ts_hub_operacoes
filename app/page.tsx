@@ -131,49 +131,37 @@ function formatDate(raw: string): string {
   if (!raw) return "";
   const s = raw.trim();
 
-  // 1. ISO 8601 / Meta format (2026-03-05T21:17:49-03:00 ou 2026-03-05 21:17:49)
+  // 1. ISO 8601 com timezone — formato Meta Ads (2026-03-05T21:17:49-03:00)
   const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
 
-  // 2. American (MM/DD/YYYY) ou Brasileiro (DD/MM/YYYY) com separadores / ou -
+  // 2. Formato textual GLS: "Mar 14 2026" ou "Mar 14 2026"
+  const monthMap: Record<string, string> = {
+    jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",
+    jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12",
+  };
+  const textualMatch = s.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})/);
+  if (textualMatch) {
+    const m = monthMap[textualMatch[1].toLowerCase()] ?? "01";
+    return `${textualMatch[3]}-${m}-${textualMatch[2].padStart(2, "0")}`;
+  }
+
+  // 3. DD/MM/YYYY ou MM/DD/YYYY com separadores
   const dateMatch = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
   if (dateMatch) {
     const v1 = parseInt(dateMatch[1]);
     const v2 = parseInt(dateMatch[2]);
     const year = dateMatch[3];
-    
-    // Heurística de identificação:
-    // Se o primeiro número for > 12, só pode ser DD/MM/YYYY (BR)
-    if (v1 > 12) return `${year}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}`;
-    
-    // Se o segundo número for > 12, só pode ser MM/DD/YYYY (US)
-    if (v2 > 12) return `${year}-${dateMatch[1].padStart(2, '0')}-${dateMatch[2].padStart(2, '0')}`;
-    
-    // Se ambos forem <= 12, priorizamos o formato Brasileiro (DD/MM/YYYY) para nosso mercado,
-    // A menos que estejamos tratando um arquivo do Meta Ads com campos americanos.
-    // No entanto, o padrão ISO-8601 acima já pega o formato nativo do Meta.
-    // Como fallback seguro, usamos o padrão Brasileiro.
-    return `${year}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}`;
+    if (v1 > 12) return `${year}-${dateMatch[2].padStart(2,"0")}-${dateMatch[1].padStart(2,"0")}`;
+    if (v2 > 12) return `${year}-${dateMatch[1].padStart(2,"0")}-${dateMatch[2].padStart(2,"0")}`;
+    return `${year}-${dateMatch[2].padStart(2,"0")}-${dateMatch[1].padStart(2,"0")}`;
   }
 
-  // 3. Formato textual (ex: "Mar 05 2026")
-  const monthMap: Record<string,string> = {
-    jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",
-    jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12",
-  };
-  const textualMatch = s.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})/);
-  if (textualMatch) { 
-    const m = monthMap[textualMatch[1].toLowerCase()]??"01"; 
-    return `${textualMatch[3]}-${m}-${textualMatch[2].padStart(2,"0")}`; 
-  }
-
-  // 4. Backup final usando o construtor Date do JS e convertendo para ISO
+  // 4. Fallback JS Date
   try {
     const d = new Date(s);
-    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-  } catch {
-    // ignora e devolve original
-  }
+    if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+  } catch { /* ignora */ }
 
   return s;
 }
@@ -182,8 +170,10 @@ function detectSource(fileName: string, headers: string[]): "gls"|"meta"|"elemen
   const fn = fileName.toLowerCase();
   const hn = new Set(headers.map(normalizeH));
   if (fn.includes("leads-inbox") || fn.includes("leadsinbox")) return "gls";
+  if (hn.has("customer") && hn.has("jobreceived") || hn.has("customer") && hn.has("leadreceived")) return "gls";
   if (hn.has("customer") && hn.has("jobtype")) return "gls";
   if (hn.has("fullname") && hn.has("phonenumber") && hn.has("createdtime")) return "meta";
+  if (hn.has("firstname") && hn.has("phonenumber") && hn.has("createdtime")) return "meta";
   if (fn.includes("leads_") && (fn.includes("_leads_") || fn.includes("lead"))) return "meta";
   if (fn.includes("elementor") || fn.includes("submissions")) return "elementor";
   if (hn.has("firstname") && hn.has("youremail")) return "elementor";
@@ -191,30 +181,36 @@ function detectSource(fileName: string, headers: string[]): "gls"|"meta"|"elemen
   return "generic";
 }
 
-// Removed parseGLS, parseMeta, parseElementor - consolidated into parseGeneric
-
 const KEYWORD_MAP: Record<string, string[]> = {
-  nome:      ['fullname', 'full_name', 'nome', 'name', 'customer', 'customer_name', 'cliente', 'first_name', 'last_name'],
+  nome:      ['fullname', 'full_name', 'nome', 'name', 'customer', 'customer_name', 'cliente', 'first_name', 'last_name', 'firstname', 'lastname'],
   email:     ['email', 'email_address', 'e-mail', 'address'],
   telefone:  ['phone_number', 'phone', 'telefone', 'phonenumber', 'celular', 'whatsapp', 'customer_phone'],
-  data:      ['created_time', 'date', 'data', 'lead_received', 'submission_date', 'created_at', 'datacriacao'],
+  data:      ['created_time', 'date', 'data', 'lead_received', 'submission_date', 'created_at', 'datacriacao', 'leadreceived'],
   plataforma:['platform', 'plataforma', 'source', 'origem', 'form_name'],
 };
 
-const NOISE_KEYWORDS = ['what_can_we_do', 'question', 'pergunta', 'how_did_you', 'message'];
+const NOISE_KEYWORDS = ['what_can_we_do', 'question', 'pergunta', 'how_did_you', 'message', 'search_intent', 'searchintent', 'location', 'chargestatus', 'charge_status', 'lastactivity', 'last_activity', 'jobtype', 'job_type', 'leadtype', 'lead_type'];
 
-function parseGeneric(rows: Record<string,string>[], platformOverride?: string): Lead[] {
+// Palavras que indicam "lixo" no campo nome vindos do GLS
+const GLS_NOISE_NAMES = new Set([
+  'deep clean','standard clean','deep cleaning','standard cleaning',
+  'move out clean','move in clean','recurring clean','one time clean',
+  'office clean','commercial clean','post construction','carpet cleaning',
+  'window cleaning','pressure washing','nan','n/a','undefined','',
+]);
+
+function isGlsNoiseName(val: string): boolean {
+  return GLS_NOISE_NAMES.has(val.toLowerCase().trim());
+}
+
+function parseGeneric(rows: Record<string,string>[], platformOverride?: string, sourceType?: "gls"|"meta"|"elementor"|"generic"): Lead[] {
   if (!rows.length) return [];
   const headers = Object.keys(rows[0]);
   const fieldMapping: Record<string, keyof Lead> = {};
 
-  // Mapeamento inteligente de colunas com base em palavras-chave
   for (const h of headers) {
     const normalized = normalizeH(h);
-    
-    // Ignora se for considerado ruído (perguntas customizadas)
     if (NOISE_KEYWORDS.some(kw => normalized.includes(kw))) continue;
-
     for (const [field, keywords] of Object.entries(KEYWORD_MAP)) {
       if (keywords.includes(normalized)) {
         fieldMapping[h] = field as keyof Lead;
@@ -223,55 +219,102 @@ function parseGeneric(rows: Record<string,string>[], platformOverride?: string):
     }
   }
 
+  // Para GLS: a primeira coluna sem header (índice 0) pode ser o telefone
+  // Detecta coluna não mapeada que contém padrões de telefone americano
+  const unmappedHeaders = headers.filter(h => !fieldMapping[h]);
+  let glsPhoneCol: string | null = null;
+  if (sourceType === "gls") {
+    for (const h of unmappedHeaders) {
+      const samples = rows.slice(0, 5).map(r => (r[h] || "").trim()).filter(Boolean);
+      const looksLikePhone = samples.some(s => /^\(\d{3}\)\s?\d{3}-\d{4}/.test(s) || /^\+?1?\d{10,}/.test(s));
+      if (looksLikePhone) { glsPhoneCol = h; break; }
+    }
+  }
+
   return rows.map((r, i) => {
-    const lead: Partial<Lead> = { id: `l-${Date.now()}-${i}`, nome: "", email: "", telefone: "", data: "", plataforma: platformOverride || "Upload CSV" };
-    
+    const lead: Partial<Lead> = {
+      id: `l-${Date.now()}-${i}`,
+      nome: "",
+      email: "",
+      telefone: "",
+      data: "",
+      plataforma: platformOverride || "Upload CSV",
+    };
+
+    // Preenche campos mapeados
     for (const [header, field] of Object.entries(fieldMapping)) {
-      const value = r[header]?.trim() ?? "";
-      if (!value) continue;
+      const value = (r[header] ?? "").trim();
 
       if (field === "data") {
-        lead.data = formatDate(value);
+        if (value) lead.data = formatDate(value);
       } else if (field === "plataforma") {
-        // Normaliza plataforma para nomes canônicos
         const pv = value.toLowerCase().trim();
         if (["fb","ig","facebook","instagram","meta","facebook ads","meta ads"].includes(pv)) {
-          lead.plataforma = "Facebook Ads";
+          lead.plataforma = "Meta Ads";
         } else if (["google","google ads","google local services","gls"].includes(pv)) {
           lead.plataforma = "Google Local Services";
-        } else {
-          lead.plataforma = value || "Upload CSV";
+        } else if (value) {
+          lead.plataforma = value;
         }
       } else if (field === "telefone") {
-        // Limpeza básica para Meta que vem com prefixos
-        lead.telefone = value.includes(":") ? value.split(":").slice(1).join(":").trim() : value;
+        if (value) {
+          lead.telefone = value.includes(":") ? value.split(":").slice(1).join(":").trim() : value;
+        }
       } else if (field === "nome") {
-        // Se já tiver nome (ex: vindo de first_name), concatena se encontrarmos outro
-        lead.nome = lead.nome ? `${lead.nome} ${value}`.trim() : value;
-      } else if (field !== "id") {
-        (lead as any)[field] = value;
+        if (value) {
+          lead.nome = lead.nome ? `${lead.nome} ${value}`.trim() : value;
+        }
+      } else if (field !== "id" && value) {
+        (lead as Record<string, unknown>)[field] = value;
       }
     }
 
+    // Para GLS: coluna sem header que tem telefone
+    if (sourceType === "gls" && glsPhoneCol && !lead.telefone) {
+      const val = (r[glsPhoneCol] ?? "").trim();
+      if (val) lead.telefone = val;
+    }
+
+    // Para GLS: se o nome veio vazio ou é lixo, usa o telefone ou fallback
+    if (sourceType === "gls") {
+      if (!lead.nome || isGlsNoiseName(lead.nome)) {
+        if (lead.telefone) {
+          lead.nome = lead.telefone; // nome = telefone (padrão GLS sem nome)
+        } else {
+          lead.nome = "Lead não identificado";
+        }
+      }
+    }
+
+    // Plataforma final baseada na source — sobrescreve qualquer coisa
+    if (sourceType === "gls")       lead.plataforma = "Google Local Services";
+    else if (sourceType === "meta") lead.plataforma = "Meta Ads";
+    else if (sourceType === "elementor") lead.plataforma = "Elementor Form";
+
     return lead as Lead;
-  }).filter(l => l.nome || l.telefone || l.email);
+  }).filter(l => {
+    // Para GLS: mantém tudo, mesmo sem nome/telefone (loga como genérico)
+    if (sourceType === "gls") return true;
+    return !!(l.nome || l.telefone || l.email);
+  });
 }
 
 function parseCSV(rows: Record<string,string>[], fileName: string): Lead[] {
   if (!rows.length) return [];
-  
+
   const source = detectSource(fileName, Object.keys(rows[0]));
-  
-  // Se for Meta, filtramos orgânicos antes de passar para o parser genérico potente
+
   if (source === "meta") {
-    const filteredRows = rows.filter(r => (r["is_organic"] ?? r[" is_organic"] ?? "").trim() !== "true");
-    return parseGeneric(filteredRows, "Meta Ads");
+    const filteredRows = rows.filter(r =>
+      (r["is_organic"] ?? r[" is_organic"] ?? "").trim() !== "true"
+    );
+    return parseGeneric(filteredRows, "Meta Ads", "meta");
   }
 
-  if (source === "gls")       return parseGeneric(rows, "Google Local Services");
-  if (source === "elementor") return parseGeneric(rows, "Elementor Form");
+  if (source === "gls")       return parseGeneric(rows, "Google Local Services", "gls");
+  if (source === "elementor") return parseGeneric(rows, "Elementor Form", "elementor");
 
-  return parseGeneric(rows);
+  return parseGeneric(rows, undefined, "generic");
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
