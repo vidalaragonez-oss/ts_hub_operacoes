@@ -127,15 +127,13 @@ function normalizeH(h: string): string {
   return h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");
 }
 
-function formatDate(raw: string): string {
+function formatDate(raw: any): string {
   if (!raw) return "";
-  const s = raw.trim();
+  const s = String(raw).trim();
 
-  // 1. ISO 8601 com timezone — formato Meta Ads (2026-03-05T21:17:49-03:00)
   const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
 
-  // 2. Formato textual GLS: "Mar 14 2026"
   const monthMap: Record<string, string> = {
     jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",
     jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12",
@@ -146,7 +144,6 @@ function formatDate(raw: string): string {
     return `${textualMatch[3]}-${m}-${textualMatch[2].padStart(2, "0")}`;
   }
 
-  // 3. DD/MM/YYYY ou MM/DD/YYYY com separadores
   const dateMatch = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
   if (dateMatch) {
     const v1 = parseInt(dateMatch[1]);
@@ -157,7 +154,6 @@ function formatDate(raw: string): string {
     return `${year}-${dateMatch[2].padStart(2,"0")}-${dateMatch[1].padStart(2,"0")}`;
   }
 
-  // 4. Fallback JS Date
   try {
     const d = new Date(s);
     if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
@@ -167,9 +163,8 @@ function formatDate(raw: string): string {
 }
 
 function detectSource(fileName: string, headers: string[]): "gls"|"meta"|"elementor"|"generic" {
-  const fn = fileName.toLowerCase();
-  // Limpa tudo (espaços, underlines) para não falhar no match
-  const hn = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const fn = String(fileName || "").toLowerCase();
+  const hn = headers.map(h => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, ''));
   const has = (w: string) => hn.includes(w);
 
   if (fn.includes("leads-inbox") || fn.includes("leadsinbox")) return "gls";
@@ -187,7 +182,6 @@ function detectSource(fileName: string, headers: string[]): "gls"|"meta"|"elemen
 }
 
 const KEYWORD_MAP: Record<string, string[]> = {
-  // Adicionado 'personalinformation' para o Elementor
   nome:      ['fullname', 'nome', 'name', 'customer', 'customername', 'cliente', 'firstname', 'lastname', 'personalinformation'],
   email:     ['email', 'emailaddress', 'address'],
   telefone:  ['phonenumber', 'phone', 'telefone', 'celular', 'whatsapp', 'customerphone'],
@@ -204,16 +198,16 @@ const GLS_NOISE_NAMES = new Set([
 ]);
 
 function isGlsNoiseName(val: string): boolean {
-  return GLS_NOISE_NAMES.has(val.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  return GLS_NOISE_NAMES.has(String(val || "").toLowerCase().replace(/[^a-z0-9]/g, ''));
 }
 
-function parseGeneric(rows: Record<string,string>[], platformOverride?: string, sourceType?: "gls"|"meta"|"elementor"|"generic"): Lead[] {
+function parseGeneric(rows: Record<string,any>[], platformOverride?: string, sourceType?: "gls"|"meta"|"elementor"|"generic"): Lead[] {
   if (!rows.length) return [];
   const headers = Object.keys(rows[0]);
   const fieldMapping: Record<string, keyof Lead> = {};
 
   for (const h of headers) {
-    const normalized = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normalized = String(h || "").toLowerCase().replace(/[^a-z0-9]/g, '');
     if (NOISE_KEYWORDS.some(kw => normalized.includes(kw))) continue;
     for (const [field, keywords] of Object.entries(KEYWORD_MAP)) {
       if (keywords.includes(normalized)) {
@@ -233,9 +227,10 @@ function parseGeneric(rows: Record<string,string>[], platformOverride?: string, 
       plataforma: platformOverride || "Upload CSV",
     };
 
-    // 1. Preenche com o que achou pelos nomes das colunas
+    // 1. Preenche Mapeados
     for (const [header, field] of Object.entries(fieldMapping)) {
-      const value = (r[header] ?? "").trim();
+      // Aqui está a Mágica: String() força a ser texto antes do trim()
+      const value = String(r[header] ?? "").trim();
       if (!value) continue;
 
       if (field === "data") {
@@ -258,24 +253,23 @@ function parseGeneric(rows: Record<string,string>[], platformOverride?: string, 
       }
     }
 
-    // 2. VISÃO DE RAIO-X: Busca Email e Telefone perdidos em colunas "Unnamed"
+    // 2. Visão de Raio-X
     for (const header of headers) {
       if (!fieldMapping[header]) {
-        const val = (r[header] ?? "").trim();
+        // Blindagem no Raio-X também
+        const val = String(r[header] ?? "").trim();
         if (!val) continue;
 
-        // Se parece um email válido e ainda não temos email
         if (!lead.email && val.includes('@') && val.includes('.') && !val.includes(' ')) {
           lead.email = val;
         } 
-        // Se parece um telefone (números, +, () e traços) e ainda não temos telefone
         else if (!lead.telefone && /^[\+\(\)0-9\-\.\s]{9,20}$/.test(val) && !/[a-zA-Z]/.test(val)) {
           lead.telefone = val;
         }
       }
     }
 
-    // Tratamento específico para o caos do GLS
+    // Tratamento específico GLS
     if (sourceType === "gls") {
       if (lead.nome && /^[\+\(\)0-9\-\.\s]{10,}$/.test(lead.nome)) {
         lead.telefone = lead.nome;
@@ -299,14 +293,15 @@ function parseGeneric(rows: Record<string,string>[], platformOverride?: string, 
   });
 }
 
-function parseCSV(rows: Record<string,string>[], fileName: string): Lead[] {
+function parseCSV(rows: Record<string,any>[], fileName: string): Lead[] {
   if (!rows.length) return [];
 
   const source = detectSource(fileName, Object.keys(rows[0]));
 
   if (source === "meta") {
     const filteredRows = rows.filter(r => {
-      const isOrg = (r["is_organic"] ?? r[" is_organic"] ?? "").toString().trim().toLowerCase();
+      // Blindagem final no filtro do Meta
+      const isOrg = String(r["is_organic"] ?? r[" is_organic"] ?? "").trim().toLowerCase();
       return isOrg !== "true";
     });
     return parseGeneric(filteredRows, "Meta Ads", "meta");
