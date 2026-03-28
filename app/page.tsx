@@ -914,7 +914,8 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
               {isOpen&&(
                 <div className="divide-y divide-[#2e2c29]/50">
                   {/* Cabeçalho fixo alinhado com as colunas de dados */}
-                  <div className="flex items-center gap-3 px-4 py-2 bg-[#111010]/60">
+                  <div className="w-full overflow-x-auto pb-2">
+                  <div className="flex items-center gap-3 px-4 py-2 bg-[#111010]/60 min-w-[800px]">
                     <div className="w-3.5 h-3.5 shrink-0" />
                     <div className="flex-1 min-w-0 grid grid-cols-[minmax(150px,_2fr)_minmax(130px,_1fr)_minmax(150px,_2fr)_minmax(100px,_1fr)] gap-x-4">
                       <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Nome</p>
@@ -925,7 +926,7 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
                   </div>
                   {itemsInThisPage.length > 0 ? (
                     itemsInThisPage.map(l=>(
-                      <div key={l.id} className="flex items-start gap-3 px-4 py-3 hover:bg-[#201f1d]/40 transition-colors">
+                      <div key={l.id} className="flex items-start gap-3 px-4 py-3 hover:bg-[#201f1d]/40 transition-colors min-w-[800px]">
                         <input type="checkbox" checked={selected.has(l.id)} onChange={()=>toggleSelect(l.id)}
                           className="mt-0.5 w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer shrink-0"/>
                         <div className="flex-1 min-w-0 grid grid-cols-[minmax(150px,_2fr)_minmax(130px,_1fr)_minmax(150px,_2fr)_minmax(100px,_1fr)] gap-x-4 gap-y-1">
@@ -945,10 +946,11 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
                       </div>
                     ))
                   ) : (
-                    <div className="px-4 py-4 text-center">
+                    <div className="px-4 py-4 text-center min-w-[800px]">
                       <p className="text-xs text-[#4a4844] italic">Nenhum lead nesta categoria na página atual.</p>
                     </div>
                   )}
+                  </div>
                 </div>
               )}
             </div>
@@ -957,7 +959,7 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
       )}
 
       {totalPages > 1 && (
-        <div className="flex flex-wrap md:flex-row flex-col justify-between items-center gap-4 w-full p-4 border-t border-[#2e2c29]">
+        <div className="flex flex-col sm:flex-row flex-wrap justify-between items-center gap-4 text-sm mt-4 p-4 border-t border-[#2e2c29]">
           {/* Bloco esquerdo: contagem e itens por página */}
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-xs text-[#7a7268] whitespace-nowrap">
@@ -2444,7 +2446,7 @@ const backToDashboard = () => {
               </div>
             </div>
 
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full mb-6">
               {/* Título + contagem */}
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1.5">
@@ -2458,7 +2460,7 @@ const backToDashboard = () => {
                 {leadsLoading && <span className="text-xs text-[#7a7268] animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Carregando...</span>}
               </div>
               {/* Grupo de botões de ação */}
-              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                 <button onClick={()=>setNewLeadOpen(true)}
                   className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 text-[#111] text-xs font-bold hover:bg-amber-400 active:scale-95 transition-all w-full sm:w-auto">
                   <Plus size={14} /> Novo Lead
