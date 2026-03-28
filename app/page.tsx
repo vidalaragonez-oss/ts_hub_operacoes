@@ -2159,7 +2159,7 @@ const backToDashboard = () => {
               <button
                 onClick={() => setIsAdminBugsOpen(true)}
                 title="Notificações de Bugs"
-                className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-amber-400 hover:border-amber-500/40 transition-colors"
+                className="hidden sm:flex relative items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-amber-400 hover:border-amber-500/40 transition-colors"
               >
                 <Bell size={14} />
                 <span className="hidden md:inline">Bugs</span>
@@ -2171,7 +2171,7 @@ const backToDashboard = () => {
               <button
                 onClick={() => setIsBugModalOpen(true)}
                 title="Reportar Bug"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-orange-400 hover:border-orange-500/40 transition-colors"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-orange-400 hover:border-orange-500/40 transition-colors"
               >
                 <Bug size={14} />
                 <span className="hidden md:inline">Reportar Bug</span>
@@ -2186,7 +2186,7 @@ const backToDashboard = () => {
               <>
                 {isAdmin && (
                   <button onClick={()=>setSettingsOpen(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-[#e8e2d8] hover:border-[#7a7268] transition-colors">
+                    className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-[#e8e2d8] hover:border-[#7a7268] transition-colors">
                     <SettingsIcon size={14} /> <span className="hidden md:inline">Config.</span>
                   </button>
                 )}
@@ -2196,7 +2196,7 @@ const backToDashboard = () => {
                 </button>
               </>
             )}
-            <div className="w-px h-5 bg-[#2e2c29] mx-0.5 hidden xs:block" />
+            <div className="w-px h-5 bg-[#2e2c29] mx-0.5 hidden sm:block" />
             <button onClick={handleLogout} title={`Sair (${perfil?.nome ?? ""})`}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-red-400 hover:border-red-500/40 transition-colors group">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-x-0.5">
