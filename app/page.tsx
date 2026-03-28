@@ -2171,7 +2171,7 @@ const backToDashboard = () => {
               <button
                 onClick={() => setIsBugModalOpen(true)}
                 title="Reportar Bug"
-                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-orange-400 hover:border-orange-500/40 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-orange-400 hover:border-orange-500/40 transition-colors"
               >
                 <Bug size={14} />
                 <span className="hidden md:inline">Reportar Bug</span>
