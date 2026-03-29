@@ -1090,6 +1090,12 @@ type MetaInsightData = {
   msg_leads: number;
   msg_spend: number;
   msg_cpl: number;
+  // Tráfego
+  traffic_clicks: number;
+  traffic_spend: number;
+  // Engajamento / Awareness
+  engagements: number;
+  engagement_spend: number;
   loading: boolean;
   error?: string;
 } | null;
@@ -1127,22 +1133,130 @@ function MetaDot({ accountId, data, onRefresh }: {
 }
 
 function MetaSummary({ data }: { data: MetaInsightData }) {
+  const [hovered, setHovered] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
   if (!data || data.loading || data.error || !data.account_status) return null;
-  const fmt = (v: number) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const fmt    = (v: number) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtInt = (v: number) => v.toLocaleString("pt-BR");
   const symbol = (data.currency ?? "BRL") === "USD" ? "$" : "R$";
+
+  // ── Linha resumo (sempre visível) ──────────────────────────────────────────
+  const totalLeads   = data.total_leads ?? 0;
+  const hasLeads     = totalLeads > 0;
+  const trafficOnly  = !hasLeads && (data.traffic_clicks ?? 0) > 0;
+  const engageOnly   = !hasLeads && !trafficOnly && (data.engagements ?? 0) > 0;
+
+  const leadsLabel = trafficOnly
+    ? `${fmtInt(data.traffic_clicks ?? 0)} cliques`
+    : engageOnly
+    ? `${fmtInt(data.engagements ?? 0)} interações`
+    : `${fmtInt(totalLeads)} leads`;
+
+  const cplLabel = hasLeads
+    ? `CPL ${symbol} ${fmt(data.cpl)}`
+    : null;
+
+  // ── Linhas do tooltip ──────────────────────────────────────────────────────
+  type TooltipRow = { label: string; value: string; color: string };
+  const tooltipRows: TooltipRow[] = [];
+
+  if ((data.form_leads ?? 0) > 0) {
+    tooltipRows.push({
+      label: `${fmtInt(data.form_leads)} Leads de Formulário`,
+      value: `Gasto: ${symbol} ${fmt(data.form_spend ?? 0)}  ·  CPL ${symbol} ${fmt(data.form_cpl ?? 0)}`,
+      color: "text-emerald-400",
+    });
+  }
+  if ((data.msg_leads ?? 0) > 0) {
+    tooltipRows.push({
+      label: `${fmtInt(data.msg_leads)} Conversas Iniciadas`,
+      value: `Gasto: ${symbol} ${fmt(data.msg_spend ?? 0)}  ·  CPL ${symbol} ${fmt(data.msg_cpl ?? 0)}`,
+      color: "text-blue-400",
+    });
+  }
+  if ((data.traffic_clicks ?? 0) > 0) {
+    tooltipRows.push({
+      label: `${fmtInt(data.traffic_clicks ?? 0)} Cliques no Link`,
+      value: `Gasto: ${symbol} ${fmt(data.traffic_spend ?? 0)}`,
+      color: "text-amber-400",
+    });
+  }
+  if ((data.engagements ?? 0) > 0) {
+    tooltipRows.push({
+      label: `${fmtInt(data.engagements ?? 0)} Interações / Engajamento`,
+      value: `Gasto: ${symbol} ${fmt(data.engagement_spend ?? 0)}`,
+      color: "text-purple-400",
+    });
+  }
+
+  const hasTooltip = tooltipRows.length > 0;
+
   return (
-    <div className="flex items-center gap-2 flex-wrap mt-1">
-      <span className="text-[9px] font-semibold text-[#4a4844]">
-        Gasto: <span className="text-[#7a7268]">{symbol} {fmt(data.spend)}</span>
-      </span>
-      <span className="text-[#2e2c29]">·</span>
-      <span className="text-[9px] font-semibold text-[#4a4844]">
-        Leads: <span className="text-[#7a7268]">{data.total_leads}</span>
-      </span>
-      <span className="text-[#2e2c29]">·</span>
-      <span className="text-[9px] font-semibold text-[#4a4844]">
-        CPL: <span className="text-[#7a7268]">{symbol} {fmt(data.cpl)}</span>
-      </span>
+    <div
+      ref={ref}
+      className="relative inline-block"
+      onMouseEnter={() => hasTooltip && setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* ── Linha resumo ── */}
+      <div className={`flex items-center gap-2 flex-wrap mt-1 ${hasTooltip ? "cursor-help" : ""}`}>
+        <span className="text-[9px] font-semibold text-[#4a4844]">
+          Gasto: <span className="text-[#7a7268]">{symbol} {fmt(data.spend)}</span>
+        </span>
+        <span className="text-[#2e2c29]">·</span>
+        <span className="text-[9px] font-semibold text-[#4a4844]">
+          {trafficOnly ? "Cliques: " : engageOnly ? "Engaj.: " : "Leads: "}
+          <span className="text-[#7a7268]">
+            {trafficOnly
+              ? fmtInt(data.traffic_clicks ?? 0)
+              : engageOnly
+              ? fmtInt(data.engagements ?? 0)
+              : fmtInt(totalLeads)}
+          </span>
+        </span>
+        {cplLabel && (
+          <>
+            <span className="text-[#2e2c29]">·</span>
+            <span className="text-[9px] font-semibold text-[#4a4844]">
+              CPL: <span className="text-[#7a7268]">{symbol} {fmt(data.cpl)}</span>
+            </span>
+          </>
+        )}
+        {hasTooltip && (
+          <span className="text-[8px] text-[#3a3835] leading-none">▾</span>
+        )}
+      </div>
+
+      {/* ── Tooltip dinâmico ── */}
+      {hovered && hasTooltip && (
+        <div
+          className="absolute left-0 top-[calc(100%+4px)] z-[150] min-w-[220px] max-w-[280px] rounded-xl border border-[#2e2c29] bg-[#111010] shadow-2xl shadow-black/70 px-3 py-2.5 space-y-2"
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844] border-b border-[#2e2c29] pb-1.5 mb-1">
+            Detalhes por Objetivo
+          </p>
+          {tooltipRows.map((row, i) => (
+            <div key={i} className="space-y-0.5">
+              <p className={`text-[10px] font-semibold ${row.color}`}>{row.label}</p>
+              <p className="text-[9px] text-[#7a7268]">{row.value}</p>
+            </div>
+          ))}
+          <div className="border-t border-[#2e2c29] pt-1.5 mt-1">
+            <p className="text-[9px] text-[#4a4844]">
+              Total gasto: <span className="text-[#c8c0b4] font-semibold">{symbol} {fmt(data.spend)}</span>
+            </p>
+            {hasLeads && (
+              <p className="text-[9px] text-[#4a4844]">
+                CPL médio (leads/msg): <span className="text-[#c8c0b4] font-semibold">{symbol} {fmt(data.cpl)}</span>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
