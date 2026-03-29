@@ -1078,8 +1078,11 @@ function ClientActionMenu({ onEdit, onDeactivate, onDelete, isInactive }: {
 type MetaInsightData = {
   account_status: number;
   spend: number;
+  leads: number;
+  messages: number;
   total_leads: number;
   cpl: number;
+  currency: string;
   loading: boolean;
   error?: string;
 } | null;
@@ -1119,10 +1122,11 @@ function MetaDot({ accountId, data, onRefresh }: {
 function MetaSummary({ data }: { data: MetaInsightData }) {
   if (!data || data.loading || data.error || !data.account_status) return null;
   const fmt = (v: number) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const symbol = (data.currency ?? "BRL") === "USD" ? "$" : "R$";
   return (
     <div className="flex items-center gap-2 flex-wrap mt-1">
       <span className="text-[9px] font-semibold text-[#4a4844]">
-        Gasto: <span className="text-[#7a7268]">R$ {fmt(data.spend)}</span>
+        Gasto: <span className="text-[#7a7268]">{symbol} {fmt(data.spend)}</span>
       </span>
       <span className="text-[#2e2c29]">·</span>
       <span className="text-[9px] font-semibold text-[#4a4844]">
@@ -1130,7 +1134,7 @@ function MetaSummary({ data }: { data: MetaInsightData }) {
       </span>
       <span className="text-[#2e2c29]">·</span>
       <span className="text-[9px] font-semibold text-[#4a4844]">
-        CPL: <span className="text-[#7a7268]">R$ {fmt(data.cpl)}</span>
+        CPL: <span className="text-[#7a7268]">{symbol} {fmt(data.cpl)}</span>
       </span>
     </div>
   );
@@ -1612,6 +1616,71 @@ function EditClienteModal({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// RADAR META ADS — Painel inline no cliente ativo
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function RadarMetaAds({ data, periodLabel }: { data: MetaInsightData; periodLabel: string }) {
+  if (!data) return null;
+
+  const fmt = (v: number) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const symbol = (data.currency ?? "BRL") === "USD" ? "$" : "R$";
+
+  if (data.loading) {
+    return (
+      <div className="rounded-xl border border-[#2e2c29] bg-[#1a1917] p-4 flex items-center gap-3 animate-pulse">
+        <div className="w-2 h-2 rounded-full bg-blue-500/50 shrink-0" />
+        <div className="space-y-1.5 flex-1">
+          <div className="h-2.5 w-24 bg-[#2e2c29] rounded" />
+          <div className="h-3 w-48 bg-[#2e2c29] rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (data.error) {
+    return (
+      <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 flex items-center gap-2">
+        <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+        <p className="text-[10px] text-red-400 font-semibold">Radar Meta Ads — erro ao carregar: {data.error}</p>
+      </div>
+    );
+  }
+
+  if (!data.account_status || data.account_status < 1) return null;
+
+  return (
+    <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+        <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Radar Meta Ads</span>
+        <span className="text-[10px] text-[#4a4844] ml-1">· {periodLabel}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="flex flex-col gap-0.5">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto Total</p>
+          <p className="text-base font-extrabold text-[#e8e2d8] leading-tight">{symbol} {fmt(data.spend)}</p>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL</p>
+          <p className="text-base font-extrabold text-[#e8e2d8] leading-tight">{symbol} {fmt(data.cpl)}</p>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Leads</p>
+          <p className="text-base font-extrabold text-[#e8e2d8] leading-tight">{data.total_leads}</p>
+          {(data.leads > 0 || data.messages > 0) && (
+            <p className="text-[9px] text-[#7a7268] font-medium leading-snug">
+              {data.leads > 0 && `${data.leads} via Form`}
+              {data.leads > 0 && data.messages > 0 && " · "}
+              {data.messages > 0 && `${data.messages} via Msg`}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // SKELETON LOADER
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1718,8 +1787,11 @@ export default function Home() {
   const [metaInsights, setMetaInsights] = useState<Record<string, {
     account_status: number;
     spend: number;
+    leads: number;
+    messages: number;
     total_leads: number;
     cpl: number;
+    currency: string;
     loading: boolean;
     error?: string;
   }>>({});
@@ -2009,12 +2081,22 @@ export default function Home() {
     since?: string,
     until?: string,
   ) => {
-    setMetaInsights(prev => ({ ...prev, [clienteId]: { ...prev[clienteId], loading: true, account_status: 0, spend: 0, total_leads: 0, cpl: 0 } }));
+    setMetaInsights(prev => ({ ...prev, [clienteId]: { ...prev[clienteId], loading: true, account_status: 0, spend: 0, leads: 0, messages: 0, total_leads: 0, cpl: 0, currency: "BRL" } }));
     try {
       const params = new URLSearchParams({ action: "insights", account_id: accountId });
       if (token) params.set("token", token);
-      if (since) params.set("since", since);
-      if (until) params.set("until", until);
+      if (since && until) {
+        params.set("since", since);
+        params.set("until", until);
+      } else {
+        // Padrão: últimos 7 dias
+        const today = new Date();
+        const from  = new Date(today);
+        from.setDate(today.getDate() - 6);
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        params.set("since", fmt(from));
+        params.set("until", fmt(today));
+      }
       const res  = await fetch(`/api/meta?${params}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -2023,15 +2105,18 @@ export default function Home() {
         [clienteId]: {
           account_status: json.account_status,
           spend:          json.spend,
+          leads:          json.leads ?? 0,
+          messages:       json.messages ?? 0,
           total_leads:    json.total_leads,
           cpl:            json.cpl,
+          currency:       json.currency ?? "BRL",
           loading:        false,
         },
       }));
     } catch (err: unknown) {
       setMetaInsights(prev => ({
         ...prev,
-        [clienteId]: { account_status: -1, spend: 0, total_leads: 0, cpl: 0, loading: false, error: (err as Error).message },
+        [clienteId]: { account_status: -1, spend: 0, leads: 0, messages: 0, total_leads: 0, cpl: 0, currency: "BRL", loading: false, error: (err as Error).message },
       }));
     }
   };
@@ -2198,13 +2283,26 @@ export default function Home() {
       : undefined,
   });
 
-const backToDashboard = () => {
+  const backToDashboard = () => {
     setClienteAtivo(null); setLeadSearch(""); setPlatFilter("");
     setDateFrom(""); setDateTo(""); setPeriodPreset("max");
     setTimeout(() => {
       window.scrollTo({ top: scrollPosRef.current, behavior: "instant" });
     }, 10); // Devolve pro pixel exato
   };
+
+  // ── Sincroniza Radar Meta Ads com o filtro de data do painel do cliente ──
+  useEffect(() => {
+    if (!clienteAtivo?.meta_ad_account_id) return;
+    fetchMetaInsights(
+      clienteAtivo.id,
+      clienteAtivo.meta_ad_account_id,
+      clienteAtivo.meta_access_token ?? null,
+      dateFrom || undefined,
+      dateTo || undefined,
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteAtivo?.id, dateFrom, dateTo]);
 
   const isAdmin = perfil?.role === "admin";
 
@@ -2655,6 +2753,20 @@ const backToDashboard = () => {
             </div>
 
             <Dropzone onParsed={handleLeadsParsed}/>
+
+            {clienteAtivo.meta_ad_account_id && (() => {
+              const metaD = metaInsights[clienteAtivo.id] ?? null;
+              let periodLabel = "Últimos 7 dias";
+              if (dateFrom && dateTo) {
+                periodLabel = `${dateFrom.split("-").reverse().join("/")} → ${dateTo.split("-").reverse().join("/")}`;
+              } else if (periodPreset !== "max" && periodPreset !== "custom") {
+                const map: Record<string, string> = { "7d": "Últimos 7 dias", "15d": "Últimos 15 dias", "30d": "Últimos 30 dias", "90d": "Últimos 90 dias" };
+                periodLabel = map[periodPreset] ?? "Últimos 7 dias";
+              } else if (periodPreset === "max") {
+                periodLabel = "Todo o período";
+              }
+              return <RadarMetaAds data={metaD} periodLabel={periodLabel} />;
+            })()}
 
             <div className="flex flex-col gap-3">
               <div className="flex flex-col sm:flex-row gap-3">
