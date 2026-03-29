@@ -63,10 +63,11 @@ export async function GET(req: NextRequest) {
         fields: "account_status,name,currency",
       });
 
-      // 2. Insights: spend + actions (leads + mensagens)
+      // 2. Insights: spend + actions com breakdown por campanha para calcular CPL por objetivo
       const insightParams: Record<string, string> = {
         access_token: token,
-        fields: "spend,actions",
+        // action_values permite calcular spend proporcional por objetivo de conversão
+        fields: "spend,actions,cost_per_action_type",
         level: "account",
       };
 
@@ -76,23 +77,23 @@ export async function GET(req: NextRequest) {
         insightParams.date_preset = "maximum";
       }
 
-      let spend = 0;
-      let leadsCount = 0;
-      let messagesCount = 0;
+      let totalSpend      = 0;
+      let leadsCount      = 0;   // Form leads (leadgen nativo)
+      let messagesCount   = 0;   // Mensagens / lead via conversa
+      let formCpl         = 0;
+      let messageCpl      = 0;
 
       try {
         const insightData = await metaFetch(`/${accountId}/insights`, insightParams);
         const row = insightData.data?.[0];
 
         if (row) {
-          spend = parseFloat(row.spend ?? "0");
+          totalSpend = parseFloat(row.spend ?? "0");
 
+          // ── Contagem de leads por tipo ────────────────────────────────────
           const actions: { action_type: string; value: string }[] = row.actions ?? [];
           for (const act of actions) {
-            if (
-              act.action_type === "lead" ||
-              act.action_type === "leadgen_grouped"
-            ) {
+            if (act.action_type === "lead" || act.action_type === "leadgen_grouped") {
               leadsCount += parseInt(act.value ?? "0", 10);
             }
             if (
@@ -102,23 +103,73 @@ export async function GET(req: NextRequest) {
               messagesCount += parseInt(act.value ?? "0", 10);
             }
           }
+
+          // ── CPL por objetivo via cost_per_action_type ─────────────────────
+          const cpaList: { action_type: string; value: string }[] = row.cost_per_action_type ?? [];
+
+          // CPL de formulário: usa o menor custo disponível entre tipos de lead form
+          const formCpaTypes = ["lead", "leadgen_grouped"];
+          for (const cpa of cpaList) {
+            if (formCpaTypes.includes(cpa.action_type)) {
+              const v = parseFloat(cpa.value ?? "0");
+              if (v > 0 && (formCpl === 0 || v < formCpl)) formCpl = v;
+            }
+          }
+
+          // CPL de mensagens
+          const msgCpaTypes = [
+            "onsite_conversion.lead_grouped",
+            "onsite_conversion.messaging_conversation_started_7d",
+          ];
+          for (const cpa of cpaList) {
+            if (msgCpaTypes.includes(cpa.action_type)) {
+              const v = parseFloat(cpa.value ?? "0");
+              if (v > 0 && (messageCpl === 0 || v < messageCpl)) messageCpl = v;
+            }
+          }
+
+          // Fallback: se não veio cost_per_action, calcula pela proporção de leads
+          const total = leadsCount + messagesCount;
+          if (total > 0) {
+            if (formCpl === 0 && leadsCount > 0) {
+              formCpl = (totalSpend * (leadsCount / total)) / leadsCount;
+            }
+            if (messageCpl === 0 && messagesCount > 0) {
+              messageCpl = (totalSpend * (messagesCount / total)) / messagesCount;
+            }
+          }
         }
       } catch {
         // Conta sem dados de insight (ex: sem campanhas) — retorna zeros
       }
 
       const totalLeads = leadsCount + messagesCount;
-      const cpl = totalLeads > 0 ? spend / totalLeads : 0;
+      const cpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
+
+      // Spend estimado por objetivo (proporcional ao volume de leads)
+      const formSpend = totalLeads > 0 && leadsCount > 0
+        ? totalSpend * (leadsCount / totalLeads)
+        : 0;
+      const msgSpend = totalLeads > 0 && messagesCount > 0
+        ? totalSpend * (messagesCount / totalLeads)
+        : 0;
 
       return NextResponse.json({
         account_status: accountData.account_status as number,
         account_name:   accountData.name as string,
         currency:       (accountData.currency as string) ?? "BRL",
-        spend,
-        leads:    leadsCount,
-        messages: messagesCount,
-        total_leads: totalLeads,
+        spend:          totalSpend,
+        leads:          leadsCount,
+        messages:       messagesCount,
+        total_leads:    totalLeads,
         cpl,
+        // Por objetivo
+        form_leads:    leadsCount,
+        form_spend:    formSpend,
+        form_cpl:      formCpl,
+        msg_leads:     messagesCount,
+        msg_spend:     msgSpend,
+        msg_cpl:       messageCpl,
       });
     }
 
