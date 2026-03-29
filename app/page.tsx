@@ -1074,8 +1074,123 @@ function ClientActionMenu({ onEdit, onDeactivate, onDelete, isInactive }: {
 // CLIENT CARD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggleAlerta, isDragging }: {
-  client:Cliente; onSelect:()=>void; onEdit:()=>void; onDeactivate:()=>void; onDelete:()=>void; onToggleAlerta:()=>void; isDragging?:boolean;
+// ─── Meta status dot ─────────────────────────────────────────────────────────
+type OtherCampaignDetail = {
+  name: string;
+  objective: string;
+  result_label: string;
+  result_count: number;
+  spend: number;
+};
+
+type MetaInsightData = {
+  account_status: number;
+  spend: number;
+  leads: number;
+  messages: number;
+  total_leads: number;
+  cpl: number;
+  currency: string;
+  // Formulário
+  form_leads: number;
+  form_spend: number;
+  form_cpl: number;
+  // Mensagens
+  msg_leads: number;
+  msg_spend: number;
+  msg_cpl: number;
+  // Outros Objetivos (tráfego, awareness, engajamento, etc.)
+  other_spend: number;
+  other_count: number;
+  other_campaigns: OtherCampaignDetail[];
+  loading: boolean;
+  error?: string;
+} | null;
+
+function MetaDot({ accountId, data, onRefresh }: {
+  accountId?: string | null;
+  data: MetaInsightData;
+  onRefresh: () => void;
+}) {
+  if (!accountId) {
+    return (
+      <span title="Sem conta Meta vinculada"
+        className="w-2 h-2 rounded-full bg-[#3a3835] shrink-0 inline-block" />
+    );
+  }
+  if (!data || data.loading) {
+    return (
+      <span title="Carregando dados Meta..."
+        className="w-2 h-2 rounded-full bg-[#3a3835] shrink-0 inline-block animate-pulse" />
+    );
+  }
+  if (data.error) {
+    return (
+      <button onClick={e=>{e.stopPropagation();onRefresh();}}
+        title={`Erro: ${data.error} — clique para tentar novamente`}
+        className="w-2 h-2 rounded-full bg-amber-500 shrink-0 inline-block hover:scale-125 transition-transform" />
+    );
+  }
+  const isActive = data.account_status === 1;
+  return (
+    <button onClick={e=>{e.stopPropagation();onRefresh();}}
+      title={isActive ? "Meta Ads ativo — clique para atualizar" : "Meta Ads com problema — clique para atualizar"}
+      className={`w-2 h-2 rounded-full shrink-0 inline-block hover:scale-125 transition-transform ${isActive ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]" : "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.7)]"}`} />
+  );
+}
+
+// MetaSummary — Visão Externa (lista de clientes)
+// Mostra apenas Formulário + Mensagens (dados dos últimos 7 dias).
+// "Outros Objetivos" são omitidos intencionalmente aqui.
+function MetaSummary({ data }: { data: MetaInsightData }) {
+  if (!data || data.loading || data.error || !data.account_status) return null;
+
+  const fmt    = (v: number) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtInt = (v: number) => v.toLocaleString("pt-BR");
+  const symbol = (data.currency ?? "BRL") === "USD" ? "US$" : "R$";
+
+  // Só soma form + msg — gasto total "de negócio"
+  const bizLeads = (data.form_leads ?? 0) + (data.msg_leads ?? 0);
+  const bizSpend = (data.form_spend ?? 0) + (data.msg_spend ?? 0);
+  const bizCpl   = bizLeads > 0 ? bizSpend / bizLeads : 0;
+
+  // Se não houve nenhum gasto relevante, não mostra nada
+  if (bizSpend === 0 && data.spend === 0) return null;
+
+  // Gasto exibido: gasto de negócio se existir, caso contrário total (ex: só "outros")
+  const displaySpend = bizSpend > 0 ? bizSpend : data.spend;
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap mt-1">
+      {/* Gasto */}
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#201f1d] border border-[#2e2c29] text-[#7a7268]">
+        <Activity size={9} className="text-[#4a4844]" />
+        {symbol} {fmt(displaySpend)}
+      </span>
+
+      {/* Leads — só aparece se houver leads reais */}
+      {bizLeads > 0 && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/8 border border-blue-500/25 text-blue-400">
+          <Target size={9} />
+          {fmtInt(bizLeads)} leads
+        </span>
+      )}
+
+      {/* CPL — só aparece se houver leads */}
+      {bizLeads > 0 && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/8 border border-emerald-500/25 text-emerald-400">
+          <Zap size={9} />
+          CPL {symbol} {fmt(bizCpl)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Client Card ──────────────────────────────────────────────────────────────
+function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggleAlerta, metaData, onRefreshMeta, isDragging }: {
+  client:Cliente; onSelect:()=>void; onEdit:()=>void; onDeactivate:()=>void; onDelete:()=>void;
+  onToggleAlerta:()=>void; metaData: MetaInsightData; onRefreshMeta:()=>void; isDragging?:boolean;
 }) {
   const st=clienteStatus(client);
   const gestorColor=client.gestor_estrategico==="Duda"?"bg-blue-600/20 text-blue-400 border-blue-500/30":
@@ -1091,13 +1206,14 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
+            <MetaDot accountId={client.meta_ad_account_id} data={metaData} onRefresh={onRefreshMeta} />
             <button
               onClick={e=>{e.stopPropagation();onToggleAlerta();}}
               title={temAlerta ? "Remover alerta de pagamento" : "Marcar alerta de pagamento"}
               className="shrink-0 transition-colors hover:scale-110">
               <CreditCard size={14} className={temAlerta ? "text-red-500" : "text-[#3a3835]"} />
             </button>
-            <p className="font-bold text-[#e8e2d8] text-sm leading-tight">{client.nome}</p>
+            <p className="font-bold text-[#e8e2d8] text-sm leading-tight truncate">{client.nome}</p>
           </div>
           <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${st.badge}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`}/>{st.label}
@@ -1114,6 +1230,7 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
           </span>
         )):<span className="text-[#7a7268] text-xs italic">Nenhuma plataforma</span>}
       </div>
+      <MetaSummary data={metaData} />
       <div className="flex items-center gap-2 flex-wrap border-t border-[#2e2c29]/50 pt-2">
         <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#201f1d] border border-[#2e2c29] text-[#7a7268]">
           <Layers size={10} /> {client.gestor}
@@ -1129,8 +1246,9 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
   );
 }
 
-function ClientRow({ client, onSelect, onEdit, onDeactivate, onDelete, onToggleAlerta, dragHandleProps, dragRef, draggableProps, isDragging, showDragHandle }: {
-  client:Cliente; onSelect:()=>void; onEdit:()=>void; onDeactivate:()=>void; onDelete:()=>void; onToggleAlerta:()=>void;
+function ClientRow({ client, onSelect, onEdit, onDeactivate, onDelete, onToggleAlerta, metaData, onRefreshMeta, dragHandleProps, dragRef, draggableProps, isDragging, showDragHandle }: {
+  client:Cliente; onSelect:()=>void; onEdit:()=>void; onDeactivate:()=>void; onDelete:()=>void;
+  onToggleAlerta:()=>void; metaData: MetaInsightData; onRefreshMeta:()=>void;
   dragHandleProps?: Record<string, unknown> | null;
   dragRef?: (el: HTMLElement | null) => void;
   draggableProps?: Record<string, unknown>;
@@ -1162,10 +1280,14 @@ function ClientRow({ client, onSelect, onEdit, onDeactivate, onDelete, onToggleA
       )}
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
+          <MetaDot accountId={client.meta_ad_account_id} data={metaData} onRefresh={onRefreshMeta} />
           <button onClick={e=>{e.stopPropagation();onToggleAlerta();}} title={temAlerta?"Remover alerta":"Marcar alerta de pagamento"} className="shrink-0 hover:scale-110 transition-transform">
             <CreditCard size={13} className={temAlerta ? "text-red-500" : "text-[#3a3835]"} />
           </button>
-          <p className="font-semibold text-[#e8e2d8] text-sm truncate max-w-[180px]">{client.nome}</p>
+          <div className="min-w-0">
+            <p className="font-semibold text-[#e8e2d8] text-sm truncate max-w-[160px]">{client.nome}</p>
+            <MetaSummary data={metaData} />
+          </div>
         </div>
       </td>
       <td className="px-4 py-3">
@@ -1541,6 +1663,321 @@ function EditClienteModal({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// RADAR META ADS — Painel inline no cliente ativo, filtro independente
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type RadarPreset = "today" | "yesterday" | "7d" | "30d" | "custom";
+
+function computeRadarDates(preset: RadarPreset): { since: string; until: string } {
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const today = new Date();
+  if (preset === "today") {
+    const s = fmt(today); return { since: s, until: s };
+  }
+  if (preset === "yesterday") {
+    const y = new Date(today); y.setDate(today.getDate() - 1); const s = fmt(y); return { since: s, until: s };
+  }
+  if (preset === "7d") {
+    const from = new Date(today); from.setDate(today.getDate() - 6); return { since: fmt(from), until: fmt(today) };
+  }
+  if (preset === "30d") {
+    const from = new Date(today); from.setDate(today.getDate() - 29); return { since: fmt(from), until: fmt(today) };
+  }
+  return { since: fmt(today), until: fmt(today) };
+}
+
+const RADAR_PRESET_LABELS: Record<RadarPreset, string> = {
+  today: "Hoje", yesterday: "Ontem", "7d": "7 dias", "30d": "30 dias", custom: "Custom",
+};
+
+// ─── RadarWrapper: componente com estado próprio ──────────────────────────────
+function renderRadar({
+  data,
+  preset,
+  customFrom,
+  customTo,
+  showCustom,
+  onPresetClick,
+  onCustomFromChange,
+  onCustomToChange,
+  onCustomApply,
+}: {
+  data: MetaInsightData;
+  preset: RadarPreset;
+  customFrom: string;
+  customTo: string;
+  showCustom: boolean;
+  onPresetClick: (p: RadarPreset) => void;
+  onCustomFromChange: (v: string) => void;
+  onCustomToChange: (v: string) => void;
+  onCustomApply: () => void;
+}) {
+  const fmt = (v: number) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtInt = (v: number) => v.toLocaleString("pt-BR");
+  const symbol = !data || (data.currency ?? "BRL") === "BRL" ? "R$" : "US$";
+
+  const hasForm  = data && !data.loading && !data.error && data.form_leads > 0;
+  const hasMsg   = data && !data.loading && !data.error && data.msg_leads  > 0;
+  const hasOther = data && !data.loading && !data.error && (data.other_spend ?? 0) > 0;
+  const hasData  = data && !data.loading && !data.error && data.account_status >= 1;
+
+  return (
+    <div className="rounded-xl border border-blue-500/20 bg-[#111827]/60 p-4 space-y-3">
+      {/* Header + seletor de período */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M24 12.073c0-6.627-5.372-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" fill="#1877F2"/>
+          </svg>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Radar Meta Ads</span>
+          {data?.loading && <span className="w-3 h-3 rounded-full border border-t-blue-400 animate-spin border-blue-500/20 inline-block" />}
+        </div>
+        {/* Pills de período */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {(["today","yesterday","7d","30d","custom"] as RadarPreset[]).map(p => (
+            <button key={p} onClick={() => onPresetClick(p)}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                preset === p
+                  ? "bg-blue-500 border-blue-400 text-white"
+                  : "bg-[#1a1917] border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8] hover:border-[#4a4844]"
+              }`}>
+              {RADAR_PRESET_LABELS[p]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Campos de data personalizada */}
+      {showCustom && (
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input type="date" value={customFrom} onChange={e => onCustomFromChange(e.target.value)}
+            className="flex-1 bg-[#1a1917] border border-[#2e2c29] rounded-lg px-3 py-1.5 text-xs text-[#e8e2d8] outline-none focus:border-blue-500/60 transition-colors [color-scheme:dark]"/>
+          <input type="date" value={customTo} onChange={e => onCustomToChange(e.target.value)}
+            className="flex-1 bg-[#1a1917] border border-[#2e2c29] rounded-lg px-3 py-1.5 text-xs text-[#e8e2d8] outline-none focus:border-blue-500/60 transition-colors [color-scheme:dark]"/>
+          <button onClick={onCustomApply} disabled={!customFrom || !customTo}
+            className="px-3 py-1.5 rounded-lg bg-blue-500 text-white text-[10px] font-bold hover:bg-blue-400 transition-colors disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap">
+            Aplicar
+          </button>
+        </div>
+      )}
+
+      {/* Estado de erro */}
+      {data?.error && (
+        <div className="flex items-center gap-2 py-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+          <p className="text-[10px] text-red-400 font-semibold">Erro: {data.error}</p>
+        </div>
+      )}
+
+      {/* Loading skeleton */}
+      {data?.loading && (
+        <div className="grid grid-cols-3 gap-3 animate-pulse">
+          {[1,2,3].map(i => (
+            <div key={i} className="space-y-1.5">
+              <div className="h-2 w-14 bg-[#2e2c29] rounded" />
+              <div className="h-5 w-20 bg-[#2e2c29] rounded" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Dados: bloco consolidado (nenhum objetivo de lead/msg) */}
+      {hasData && !hasForm && !hasMsg && !hasOther && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="flex flex-col gap-0.5">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto Total</p>
+            <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.spend)}</p>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL Médio</p>
+            <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.cpl)}</p>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Leads</p>
+            <p className="text-sm font-extrabold text-[#e8e2d8]">{data!.total_leads}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Dados: blocos separados por objetivo */}
+      {hasData && (hasForm || hasMsg || hasOther) && (
+        <div className="space-y-2">
+          {/* Totais no topo */}
+          <div className="flex items-center justify-between pb-2 border-b border-[#2e2c29]">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto Total</p>
+                <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.spend)}</p>
+              </div>
+              {(hasForm || hasMsg) && (
+                <>
+                  <div className="w-px h-8 bg-[#2e2c29]" />
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL Médio</p>
+                    <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.cpl)}</p>
+                  </div>
+                  <div className="w-px h-8 bg-[#2e2c29]" />
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Total Leads</p>
+                    <p className="text-sm font-extrabold text-[#e8e2d8]">{data!.total_leads}</p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Bloco: Formulário */}
+          {hasForm && (
+            <div className="flex items-center gap-3 rounded-lg bg-blue-500/8 border border-blue-500/15 px-3 py-2.5">
+              <div className="shrink-0">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 uppercase tracking-wide">
+                  Formulário
+                </span>
+              </div>
+              <div className="flex items-center gap-4 flex-1 flex-wrap">
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Leads</p>
+                  <p className="text-xs font-extrabold text-[#e8e2d8]">{fmtInt(data!.form_leads)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto</p>
+                  <p className="text-xs font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.form_spend)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL</p>
+                  <p className="text-xs font-extrabold text-blue-300">{symbol} {fmt(data!.form_cpl)}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Bloco: Mensagens */}
+          {hasMsg && (
+            <div className="flex items-center gap-3 rounded-lg bg-emerald-500/8 border border-emerald-500/15 px-3 py-2.5">
+              <div className="shrink-0">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wide">
+                  Mensagens
+                </span>
+              </div>
+              <div className="flex items-center gap-4 flex-1 flex-wrap">
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Conversas</p>
+                  <p className="text-xs font-extrabold text-[#e8e2d8]">{fmtInt(data!.msg_leads)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto</p>
+                  <p className="text-xs font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.msg_spend)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL</p>
+                  <p className="text-xs font-extrabold text-emerald-300">{symbol} {fmt(data!.msg_cpl)}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Bloco: Outros Objetivos — tráfego, awareness, engajamento, etc. */}
+          {hasOther && (
+            <div className="rounded-lg bg-[#201f1d] border border-[#2e2c29] overflow-hidden">
+              {/* Cabeçalho do bloco */}
+              <div className="flex items-center justify-between px-3 py-2 border-b border-[#2e2c29]">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/25 uppercase tracking-wide">
+                  Outros Objetivos
+                </span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto</p>
+                    <p className="text-xs font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.other_spend)}</p>
+                  </div>
+                  {(data!.other_count ?? 0) > 0 && (
+                    <div className="text-right">
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Resultados</p>
+                      <p className="text-xs font-extrabold text-[#e8e2d8]">{fmtInt(data!.other_count)}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* Linhas por campanha */}
+              <div className="divide-y divide-[#1a1917]">
+                {(data!.other_campaigns ?? []).map((c, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold text-[#c8c0b4] truncate">{c.name}</p>
+                      <p className="text-[9px] text-[#4a4844] truncate">{c.objective.replace("OUTCOME_", "").replace(/_/g, " ")}</p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 text-right">
+                      <div>
+                        <p className="text-[9px] font-bold text-[#4a4844]">{c.result_label}</p>
+                        <p className="text-[10px] font-extrabold text-amber-300">{fmtInt(c.result_count)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-bold text-[#4a4844]">Gasto</p>
+                        <p className="text-[10px] font-extrabold text-[#7a7268]">{symbol} {fmt(c.spend)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Sem dados */}
+      {data && !data.loading && !data.error && data.account_status >= 1 && data.total_leads === 0 && data.spend === 0 && (data.other_spend ?? 0) === 0 && (
+        <p className="text-[10px] text-[#4a4844] italic text-center py-1">Nenhum dado para o período selecionado.</p>
+      )}
+    </div>
+  );
+}
+
+// ─── RadarWrapper: componente com estado próprio ──────────────────────────────
+function RadarWrapper({
+  clienteId, accountId, token, data, onFetch,
+}: {
+  clienteId: string;
+  accountId: string;
+  token: string | null;
+  data: MetaInsightData;
+  onFetch: (clienteId: string, accountId: string, token: string | null, since: string, until: string) => void;
+}) {
+  const [preset, setPreset]         = useState<RadarPreset>("7d");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo,   setCustomTo]   = useState("");
+  const [showCustom, setShowCustom] = useState(false);
+
+  // Dispara fetch ao montar e ao mudar preset (exceto custom)
+  useEffect(() => {
+    if (preset === "custom") return;
+    const { since, until } = computeRadarDates(preset);
+    onFetch(clienteId, accountId, token, since, until);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId, preset]);
+
+  const handlePresetClick = (p: RadarPreset) => {
+    setPreset(p);
+    setShowCustom(p === "custom");
+  };
+
+  const handleCustomApply = () => {
+    if (!customFrom || !customTo) return;
+    onFetch(clienteId, accountId, token, customFrom, customTo);
+  };
+
+  return renderRadar({
+    data,
+    preset,
+    customFrom,
+    customTo,
+    showCustom,
+    onPresetClick: handlePresetClick,
+    onCustomFromChange: setCustomFrom,
+    onCustomToChange: setCustomTo,
+    onCustomApply: handleCustomApply,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // SKELETON LOADER
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1599,6 +2036,9 @@ function normalizeCliente(raw: Record<string, unknown>): Cliente {
     platforms: Array.isArray(raw.platforms) ? (raw.platforms as Platform[]) : [],
     tipo_campanha: tcArray,
     alerta_pagamento: raw.alerta_pagamento === true,
+    meta_ad_account_id: (raw.meta_ad_account_id as string) ?? null,
+    meta_access_token:  (raw.meta_access_token  as string) ?? null,
+    meta_status:        (raw.meta_status         as string) ?? "sem_link",
   } as Cliente;
 }
 
@@ -1641,6 +2081,23 @@ export default function Home() {
   const [gestorFilter, setGestorFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("todos");
   const [pendenciasFilter, setPendenciasFilter] = useState(false);
+  const [metaInsights, setMetaInsights] = useState<Record<string, {
+    account_status: number;
+    spend: number;
+    leads: number;
+    messages: number;
+    total_leads: number;
+    cpl: number;
+    currency: string;
+    form_leads: number;
+    form_spend: number;
+    form_cpl: number;
+    msg_leads: number;
+    msg_spend: number;
+    msg_cpl: number;
+    loading: boolean;
+    error?: string;
+  }>>({});
   const [viewMode, setViewMode]         = useState<ViewMode>("grid");
   const [sortMode, setSortMode]         = useState<SortMode>("personalizada");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1754,18 +2211,25 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from("clientes")
-        .select("id, nome, operacao_id, gestor, gestor_estrategico, platforms, status, created_at, ordem, tipo_campanha, alerta_pagamento")
+        .select("id, nome, operacao_id, gestor, gestor_estrategico, platforms, status, created_at, ordem, tipo_campanha, alerta_pagamento, meta_ad_account_id, meta_access_token, meta_status")
         .eq("operacao_id",operacaoId)
         .order("ordem",{ascending:true,nullsFirst:false})
         .order("created_at",{ascending:true});
       if (error) throw error;
       const rows = ((data as Record<string, unknown>[]) ?? []).map(normalizeCliente);
       setClientes(rows);
+      // Dispara fetch Meta Ads para todos os clientes com conta vinculada
+      rows.forEach(c => {
+        if (c.meta_ad_account_id) {
+          fetchMetaInsights(c.id, c.meta_ad_account_id, c.meta_access_token ?? null);
+        }
+      });
     } catch (err: unknown) {
       toast.error(`Erro ao carregar clientes: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
     } finally {
       setClientesLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelectOperacao = (op: Operacao) => {
@@ -1909,6 +2373,64 @@ export default function Home() {
       );
     } catch (err: unknown) {
       toast.error(`Erro: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
+    }
+  };
+
+  // ── Busca insights Meta Ads por cliente ───────────────────────────────────
+  const fetchMetaInsights = async (
+    clienteId: string,
+    accountId: string,
+    token: string | null,
+    since?: string,
+    until?: string,
+  ) => {
+    const zero = { account_status: 0, spend: 0, leads: 0, messages: 0, total_leads: 0, cpl: 0, currency: "BRL", form_leads: 0, form_spend: 0, form_cpl: 0, msg_leads: 0, msg_spend: 0, msg_cpl: 0, other_spend: 0, other_count: 0, other_campaigns: [] as OtherCampaignDetail[] };
+    setMetaInsights(prev => ({ ...prev, [clienteId]: { ...zero, loading: true } }));
+    try {
+      const params = new URLSearchParams({ action: "insights", account_id: accountId });
+      if (token) params.set("token", token);
+      if (since && until) {
+        params.set("since", since);
+        params.set("until", until);
+      } else {
+        // Padrão dos badges externos: últimos 7 dias
+        const today = new Date();
+        const from  = new Date(today);
+        from.setDate(today.getDate() - 6);
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        params.set("since", fmt(from));
+        params.set("until", fmt(today));
+      }
+      const res  = await fetch(`/api/meta?${params}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setMetaInsights(prev => ({
+        ...prev,
+        [clienteId]: {
+          account_status:  json.account_status,
+          spend:           json.spend,
+          leads:           json.leads           ?? 0,
+          messages:        json.messages        ?? 0,
+          total_leads:     json.total_leads,
+          cpl:             json.cpl,
+          currency:        json.currency        ?? "BRL",
+          form_leads:      json.form_leads      ?? 0,
+          form_spend:      json.form_spend      ?? 0,
+          form_cpl:        json.form_cpl        ?? 0,
+          msg_leads:       json.msg_leads       ?? 0,
+          msg_spend:       json.msg_spend       ?? 0,
+          msg_cpl:         json.msg_cpl         ?? 0,
+          other_spend:     json.other_spend     ?? 0,
+          other_count:     json.other_count     ?? 0,
+          other_campaigns: json.other_campaigns ?? [],
+          loading:         false,
+        },
+      }));
+    } catch (err: unknown) {
+      setMetaInsights(prev => ({
+        ...prev,
+        [clienteId]: { account_status: -1, spend: 0, leads: 0, messages: 0, total_leads: 0, cpl: 0, currency: "BRL", form_leads: 0, form_spend: 0, form_cpl: 0, msg_leads: 0, msg_spend: 0, msg_cpl: 0, other_spend: 0, other_count: 0, other_campaigns: [], loading: false, error: (err as Error).message },
+      }));
     }
   };
 
@@ -2068,9 +2590,13 @@ export default function Home() {
     onDeactivate:    ()=>handleDeactivate(c.id),
     onDelete:        ()=>handleDelete(c.id),
     onToggleAlerta:  ()=>handleToggleAlerta(c.id),
+    metaData:        metaInsights[c.id] ?? null,
+    onRefreshMeta:   () => c.meta_ad_account_id
+      ? fetchMetaInsights(c.id, c.meta_ad_account_id, c.meta_access_token ?? null, dateFrom || undefined, dateTo || undefined)
+      : undefined,
   });
 
-const backToDashboard = () => {
+  const backToDashboard = () => {
     setClienteAtivo(null); setLeadSearch(""); setPlatFilter("");
     setDateFrom(""); setDateTo(""); setPeriodPreset("max");
     setTimeout(() => {
@@ -2527,6 +3053,16 @@ const backToDashboard = () => {
             </div>
 
             <Dropzone onParsed={handleLeadsParsed}/>
+
+            {clienteAtivo.meta_ad_account_id && (
+              <RadarWrapper
+                clienteId={clienteAtivo.id}
+                accountId={clienteAtivo.meta_ad_account_id}
+                token={clienteAtivo.meta_access_token ?? null}
+                data={metaInsights[clienteAtivo.id] ?? null}
+                onFetch={fetchMetaInsights}
+              />
+            )}
 
             <div className="flex flex-col gap-3">
               <div className="flex flex-col sm:flex-row gap-3">
