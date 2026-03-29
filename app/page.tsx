@@ -1754,7 +1754,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from("clientes")
-        .select("id, nome, operacao_id, gestor, gestor_estrategico, platforms, status, created_at, ordem, tipo_campanha")
+        .select("id, nome, operacao_id, gestor, gestor_estrategico, platforms, status, created_at, ordem, tipo_campanha, alerta_pagamento")
         .eq("operacao_id",operacaoId)
         .order("ordem",{ascending:true,nullsFirst:false})
         .order("created_at",{ascending:true});
