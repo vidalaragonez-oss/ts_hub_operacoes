@@ -63,12 +63,35 @@ export async function GET(req: NextRequest) {
         fields: "account_status,name,currency",
       });
 
-      // 2. Insights por CAMPANHA — resolve dois problemas:
-      //    a) gasto real inclui campanhas sem conversões
-      //    b) action_types por campanha não sofrem agrupamento duplo
+      // 2. Objetivos reais das campanhas (campo `objective` — fonte da verdade)
+      //    Busca todas as campanhas da conta para montar um mapa campaign_id → objective
+      const objectiveMap = new Map<string, string>();
+      try {
+        let url: string | null = `/${accountId}/campaigns`;
+        while (url) {
+          const campData = await metaFetch(url, {
+            access_token: token,
+            fields: "id,objective",
+            limit: "500",
+          });
+          for (const c of (campData.data ?? []) as { id: string; objective: string }[]) {
+            objectiveMap.set(c.id, c.objective ?? "UNKNOWN");
+          }
+          // Paginação (cursor-based)
+          url = campData.paging?.cursors?.after
+            ? `/${accountId}/campaigns?after=${campData.paging.cursors.after}`
+            : null;
+          // Segurança: sai após 5 páginas (2500 campanhas)
+          if (campData.paging?.next === undefined) break;
+        }
+      } catch {
+        // Sem permissão para ler campanhas — segue sem objectives
+      }
+
+      // 3. Insights por campanha com campaign_id para cruzar com o mapa de objetivos
       const insightParams: Record<string, string> = {
         access_token: token,
-        fields: "campaign_name,spend,actions,cost_per_action_type",
+        fields: "campaign_id,campaign_name,spend,actions,cost_per_action_type",
         level: "campaign",
         limit: "500",
       };
@@ -79,19 +102,30 @@ export async function GET(req: NextRequest) {
         insightParams.date_preset = "maximum";
       }
 
-      // Tipos de lead que NÃO devem ser somados juntos (são aliases do mesmo evento)
-      // Hierarquia Meta: lead > leadgen_grouped (ambos representam leads de formulário)
-      // Regra: usar APENAS "lead" para formulário — é o mais granular e sem duplicação
+      // Mapa de objectives para labels amigáveis exibidos na UI
+      const OBJECTIVE_LABEL: Record<string, string> = {
+        OUTCOME_LEADS:            "Leads",
+        OUTCOME_ENGAGEMENT:       "Engajamento",
+        OUTCOME_AWARENESS:        "Reconhecimento",
+        OUTCOME_TRAFFIC:          "Tráfego",
+        OUTCOME_SALES:            "Vendas",
+        OUTCOME_APP_PROMOTION:    "App",
+        MESSAGES:                 "Mensagens",
+        UNKNOWN:                  "—",
+      };
+
+      // Tipos de lead que NÃO devem ser somados (aliases duplicados)
       const FORM_LEAD_TYPE  = "lead";
       const MSG_LEAD_TYPES  = new Set([
         "onsite_conversion.messaging_conversation_started_7d",
         "onsite_conversion.lead_grouped",
       ]);
-      // Tipos a IGNORAR pois são agrupamentos que duplicam "lead"
       const SKIP_LEAD_TYPES = new Set(["leadgen_grouped"]);
 
       type CampaignRow = {
         campaign_name: string;
+        objective: string;       // valor bruto ex: OUTCOME_LEADS
+        objective_label: string; // label amigável ex: "Leads"
         spend: string;
         form_leads: number;
         msg_leads: number;
@@ -99,7 +133,7 @@ export async function GET(req: NextRequest) {
         msg_cpl: number;
       };
 
-      let totalSpend    = 0;
+      let totalSpend     = 0;
       let totalFormLeads = 0;
       let totalMsgLeads  = 0;
       const campaigns: CampaignRow[] = [];
@@ -109,8 +143,12 @@ export async function GET(req: NextRequest) {
         const rows: Record<string, unknown>[] = insightData.data ?? [];
 
         for (const row of rows) {
+          const campId    = (row.campaign_id as string) ?? "";
           const campSpend = parseFloat((row.spend as string) ?? "0");
           totalSpend += campSpend;
+
+          const objective      = objectiveMap.get(campId) ?? "UNKNOWN";
+          const objectiveLabel = OBJECTIVE_LABEL[objective] ?? objective;
 
           const actions: { action_type: string; value: string }[] =
             (row.actions as { action_type: string; value: string }[]) ?? [];
@@ -121,7 +159,7 @@ export async function GET(req: NextRequest) {
           let campMsgLeads  = 0;
 
           for (const act of actions) {
-            if (SKIP_LEAD_TYPES.has(act.action_type)) continue; // ignora alias duplicado
+            if (SKIP_LEAD_TYPES.has(act.action_type)) continue;
             if (act.action_type === FORM_LEAD_TYPE) {
               campFormLeads += parseInt(act.value ?? "0", 10);
             }
@@ -133,7 +171,6 @@ export async function GET(req: NextRequest) {
           totalFormLeads += campFormLeads;
           totalMsgLeads  += campMsgLeads;
 
-          // CPL por campanha — direto do cost_per_action_type
           let campFormCpl = 0;
           let campMsgCpl  = 0;
           for (const cpa of cpaList) {
@@ -148,7 +185,7 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          // Fallback: calcula CPL pela proporção de spend/leads desta campanha
+          // Fallback proporcional
           const campTotal = campFormLeads + campMsgLeads;
           if (campTotal > 0) {
             if (campFormCpl === 0 && campFormLeads > 0) {
@@ -160,22 +197,23 @@ export async function GET(req: NextRequest) {
           }
 
           campaigns.push({
-            campaign_name: (row.campaign_name as string) ?? "Campanha",
-            spend: campSpend.toFixed(2),
-            form_leads: campFormLeads,
-            msg_leads:  campMsgLeads,
-            form_cpl:   campFormCpl,
-            msg_cpl:    campMsgCpl,
+            campaign_name:  (row.campaign_name as string) ?? "Campanha",
+            objective,
+            objective_label: objectiveLabel,
+            spend:           campSpend.toFixed(2),
+            form_leads:      campFormLeads,
+            msg_leads:       campMsgLeads,
+            form_cpl:        campFormCpl,
+            msg_cpl:         campMsgCpl,
           });
         }
       } catch {
-        // Conta sem dados de insight — retorna zeros
+        // Sem dados de insight
       }
 
       const totalLeads = totalFormLeads + totalMsgLeads;
-      const cpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
+      const cpl        = totalLeads > 0 ? totalSpend / totalLeads : 0;
 
-      // CPL global por objetivo: spend proporcional / qtd leads
       const formSpend = totalLeads > 0 && totalFormLeads > 0
         ? totalSpend * (totalFormLeads / totalLeads) : 0;
       const msgSpend = totalLeads > 0 && totalMsgLeads > 0
@@ -192,14 +230,12 @@ export async function GET(req: NextRequest) {
         messages:       totalMsgLeads,
         total_leads:    totalLeads,
         cpl,
-        // Por objetivo (totais)
         form_leads: totalFormLeads,
         form_spend: formSpend,
         form_cpl:   formCpl,
         msg_leads:  totalMsgLeads,
         msg_spend:  msgSpend,
         msg_cpl:    msgCpl,
-        // Detalhamento por campanha
         campaigns,
       });
     }
