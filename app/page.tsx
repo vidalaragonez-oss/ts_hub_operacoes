@@ -1093,6 +1093,8 @@ type MetaInsightData = {
   // Por campanha
   campaigns: {
     campaign_name: string;
+    objective: string;
+    objective_label: string;
     spend: string;
     form_leads: number;
     msg_leads: number;
@@ -1748,96 +1750,30 @@ function renderRadar({
         </div>
       )}
 
-      {/* Dados: bloco consolidado */}
-      {hasData && !hasForm && !hasMsg && (
-        <div className="grid grid-cols-3 gap-3">
+      {/* Dados: resumo consolidado (único bloco de totais) */}
+      {hasData && (
+        <div className="flex items-center gap-4 flex-wrap pb-2 border-b border-[#2e2c29]">
           <div className="flex flex-col gap-0.5">
             <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto Total</p>
             <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.spend)}</p>
           </div>
+          <div className="w-px h-8 bg-[#2e2c29] shrink-0" />
           <div className="flex flex-col gap-0.5">
             <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL Médio</p>
             <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.cpl)}</p>
           </div>
+          <div className="w-px h-8 bg-[#2e2c29] shrink-0" />
           <div className="flex flex-col gap-0.5">
-            <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Leads</p>
+            <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Total Leads</p>
             <p className="text-sm font-extrabold text-[#e8e2d8]">{data!.total_leads}</p>
+            {(data!.form_leads > 0 || data!.msg_leads > 0) && (
+              <p className="text-[9px] text-[#7a7268] font-medium">
+                {data!.form_leads > 0 && <span className="text-blue-400/80">{data!.form_leads} form</span>}
+                {data!.form_leads > 0 && data!.msg_leads > 0 && <span className="text-[#4a4844]"> · </span>}
+                {data!.msg_leads > 0 && <span className="text-emerald-400/80">{data!.msg_leads} msg</span>}
+              </p>
+            )}
           </div>
-        </div>
-      )}
-
-      {/* Dados: blocos separados por objetivo */}
-      {hasData && (hasForm || hasMsg) && (
-        <div className="space-y-2">
-          {/* Totais no topo */}
-          <div className="flex items-center justify-between pb-2 border-b border-[#2e2c29]">
-            <div className="flex items-center gap-3">
-              <div>
-                <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto Total</p>
-                <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.spend)}</p>
-              </div>
-              <div className="w-px h-8 bg-[#2e2c29]" />
-              <div>
-                <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL Médio</p>
-                <p className="text-sm font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.cpl)}</p>
-              </div>
-              <div className="w-px h-8 bg-[#2e2c29]" />
-              <div>
-                <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Total Leads</p>
-                <p className="text-sm font-extrabold text-[#e8e2d8]">{data!.total_leads}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Bloco: Formulário */}
-          {hasForm && (
-            <div className="flex items-center gap-3 rounded-lg bg-blue-500/8 border border-blue-500/15 px-3 py-2.5">
-              <div className="shrink-0">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 uppercase tracking-wide">
-                  Formulário
-                </span>
-              </div>
-              <div className="flex items-center gap-4 flex-1 flex-wrap">
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Leads</p>
-                  <p className="text-xs font-extrabold text-[#e8e2d8]">{data!.form_leads}</p>
-                </div>
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto Est.</p>
-                  <p className="text-xs font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.form_spend)}</p>
-                </div>
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL</p>
-                  <p className="text-xs font-extrabold text-blue-300">{symbol} {fmt(data!.form_cpl)}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Bloco: Mensagens */}
-          {hasMsg && (
-            <div className="flex items-center gap-3 rounded-lg bg-emerald-500/8 border border-emerald-500/15 px-3 py-2.5">
-              <div className="shrink-0">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wide">
-                  Mensagens
-                </span>
-              </div>
-              <div className="flex items-center gap-4 flex-1 flex-wrap">
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Leads</p>
-                  <p className="text-xs font-extrabold text-[#e8e2d8]">{data!.msg_leads}</p>
-                </div>
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Gasto Est.</p>
-                  <p className="text-xs font-extrabold text-[#e8e2d8]">{symbol} {fmt(data!.msg_spend)}</p>
-                </div>
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">CPL</p>
-                  <p className="text-xs font-extrabold text-emerald-300">{symbol} {fmt(data!.msg_cpl)}</p>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -1857,8 +1793,9 @@ function renderRadar({
           </p>
           <div className="rounded-lg border border-[#2e2c29] overflow-hidden">
             {/* Header */}
-            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 py-1.5 bg-[#111010]/80 border-b border-[#2e2c29]">
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-3 py-1.5 bg-[#111010]/80 border-b border-[#2e2c29]">
               <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Campanha</p>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844] w-20">Objetivo</p>
               <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844] text-right w-16">Gasto</p>
               <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844] text-right w-12">Leads</p>
               <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844] text-right w-16">CPL</p>
@@ -1869,11 +1806,22 @@ function renderRadar({
               .sort((a, b) => parseFloat(b.spend) - parseFloat(a.spend))
               .map((camp, i) => {
                 const campLeads = camp.form_leads + camp.msg_leads;
-                const campCpl = camp.form_cpl || camp.msg_cpl || 0;
-                const hasLeads = campLeads > 0;
+                const campCpl   = camp.form_cpl || camp.msg_cpl || 0;
+                const hasLeads  = campLeads > 0;
+                // Badge color por objetivo
+                const objColors: Record<string, string> = {
+                  OUTCOME_LEADS:         "bg-blue-500/20 text-blue-300 border-blue-500/30",
+                  OUTCOME_ENGAGEMENT:    "bg-purple-500/20 text-purple-300 border-purple-500/30",
+                  OUTCOME_AWARENESS:     "bg-amber-500/20 text-amber-300 border-amber-500/30",
+                  OUTCOME_TRAFFIC:       "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+                  OUTCOME_SALES:         "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+                  OUTCOME_APP_PROMOTION: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+                  MESSAGES:              "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+                };
+                const badgeCls = objColors[camp.objective] ?? "bg-[#2e2c29] text-[#7a7268] border-[#3a3835]";
                 return (
                   <div key={i}
-                    className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 py-2 items-center ${
+                    className={`grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-3 py-2 items-center ${
                       i % 2 === 0 ? "bg-[#111010]/40" : "bg-transparent"
                     } border-b border-[#2e2c29]/50 last:border-0`}>
                     <div className="min-w-0">
@@ -1891,13 +1839,16 @@ function renderRadar({
                         </div>
                       )}
                     </div>
+                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap w-20 text-center ${badgeCls}`}>
+                      {camp.objective_label || "—"}
+                    </span>
                     <p className="text-[10px] font-semibold text-[#e8e2d8] text-right w-16 tabular-nums">
                       {symbol} {parseFloat(camp.spend).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
                     <p className={`text-[10px] font-semibold text-right w-12 tabular-nums ${hasLeads ? "text-[#e8e2d8]" : "text-[#4a4844]"}`}>
                       {hasLeads ? campLeads : "—"}
                     </p>
-                    <p className={`text-[10px] font-semibold text-right w-16 tabular-nums ${hasLeads ? "text-amber-400" : "text-[#4a4844]"}`}>
+                    <p className={`text-[10px] font-semibold text-right w-16 tabular-nums ${hasLeads && campCpl > 0 ? "text-amber-400" : "text-[#4a4844]"}`}>
                       {hasLeads && campCpl > 0
                         ? `${symbol} ${campCpl.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                         : "—"}
@@ -2093,6 +2044,8 @@ export default function Home() {
     msg_cpl: number;
     campaigns: {
       campaign_name: string;
+      objective: string;
+      objective_label: string;
       spend: string;
       form_leads: number;
       msg_leads: number;
@@ -2388,7 +2341,7 @@ export default function Home() {
     since?: string,
     until?: string,
   ) => {
-    const zero = { account_status: 0, spend: 0, leads: 0, messages: 0, total_leads: 0, cpl: 0, currency: "BRL", form_leads: 0, form_spend: 0, form_cpl: 0, msg_leads: 0, msg_spend: 0, msg_cpl: 0, campaigns: [] as { campaign_name: string; spend: string; form_leads: number; msg_leads: number; form_cpl: number; msg_cpl: number }[] };
+    const zero = { account_status: 0, spend: 0, leads: 0, messages: 0, total_leads: 0, cpl: 0, currency: "BRL", form_leads: 0, form_spend: 0, form_cpl: 0, msg_leads: 0, msg_spend: 0, msg_cpl: 0, campaigns: [] as { campaign_name: string; objective: string; objective_label: string; spend: string; form_leads: number; msg_leads: number; form_cpl: number; msg_cpl: number }[] };
     setMetaInsights(prev => ({ ...prev, [clienteId]: { ...zero, loading: true } }));
     try {
       const params = new URLSearchParams({ action: "insights", account_id: accountId });
