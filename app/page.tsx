@@ -1058,10 +1058,11 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
   const allSelected = allFilteredIds.length>0&&allFilteredIds.every(id=>selected.has(id));
   const toggleAll = () => setSelected(allSelected?new Set():new Set(allFilteredIds));
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!selected.size) return;
     if (!confirm(`Excluir ${selected.size} lead(s) permanentemente? Esta ação afetará leads selecionados em todas as páginas.`)) return;
-    onDeleteSelected([...selected]);
+    const ids = [...selected];
+    await onDeleteSelected(ids);
     setSelected(new Set());
   };
 
@@ -1134,7 +1135,27 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
                     <span className={`text-[10px] font-bold uppercase tracking-widest ${style.icon}`}>{plat}</span>
                     <span className="text-[10px] font-semibold text-[#7a7268] bg-[#1a1917] border border-[#2e2c29] px-2 py-0.5 rounded-full">{items.length}</span>
                   </div>
-                  <ChevronDown size={14} className={`transition-transform ${isOpen?"rotate-180":""} ${style.icon}`} />
+                  <div className="flex items-center gap-2" onClick={e=>e.stopPropagation()}>
+                    <button
+                      onClick={()=>{
+                        const platIds = itemsInThisPage.map(l=>l.id);
+                        const allPlatSelected = platIds.length>0&&platIds.every(id=>selected.has(id));
+                        setSelected(prev=>{
+                          const n=new Set(prev);
+                          if(allPlatSelected){platIds.forEach(id=>n.delete(id));}
+                          else{platIds.forEach(id=>n.add(id));}
+                          return n;
+                        });
+                      }}
+                      className={`text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${
+                        itemsInThisPage.length>0&&itemsInThisPage.every(l=>selected.has(l.id))
+                          ? `${style.icon} border-current bg-current/10`
+                          : "text-[#7a7268] border-[#2e2c29] hover:text-[#e8e2d8]"
+                      }`}>
+                      Selecionar
+                    </button>
+                    <ChevronDown size={14} className={`transition-transform ${isOpen?"rotate-180":""} ${style.icon}`} />
+                  </div>
                 </button>
                 {isOpen && (
                   <div className="p-3 space-y-2 bg-[#111010]/40">
@@ -1172,7 +1193,27 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
                   <span className={`text-[10px] font-bold uppercase tracking-widest ${style.icon}`}>{plat}</span>
                   <span className="text-[10px] font-semibold text-[#7a7268] bg-[#1a1917] border border-[#2e2c29] px-2 py-0.5 rounded-full">{items.length}</span>
                 </div>
-                <ChevronDown size={14} className={`transition-transform ${isOpen?"rotate-180":""} ${style.icon}`} />
+                <div className="flex items-center gap-2" onClick={e=>e.stopPropagation()}>
+                  <button
+                    onClick={()=>{
+                      const platIds = itemsInThisPage.map(l=>l.id);
+                      const allPlatSelected = platIds.length>0&&platIds.every(id=>selected.has(id));
+                      setSelected(prev=>{
+                        const n=new Set(prev);
+                        if(allPlatSelected){platIds.forEach(id=>n.delete(id));}
+                        else{platIds.forEach(id=>n.add(id));}
+                        return n;
+                      });
+                    }}
+                    className={`text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${
+                      itemsInThisPage.length>0&&itemsInThisPage.every(l=>selected.has(l.id))
+                        ? `${style.icon} border-current bg-current/10`
+                        : "text-[#7a7268] border-[#2e2c29] hover:text-[#e8e2d8]"
+                    }`}>
+                    Selecionar desta plataforma
+                  </button>
+                  <ChevronDown size={14} className={`transition-transform ${isOpen?"rotate-180":""} ${style.icon}`} />
+                </div>
               </button>
               {isOpen&&(
                 <div className="divide-y divide-[#2e2c29]/50">
