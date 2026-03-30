@@ -77,6 +77,7 @@ export interface Lead {
   cliente?: string;
   operacao_id?: string;
   created_at?: string;
+  charge_status?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
