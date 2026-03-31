@@ -1140,18 +1140,9 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
                       onClick={()=>{
                         const platIds = itemsInThisPage.map(l=>l.id);
                         const allPlatSelected = platIds.length>0&&platIds.every(id=>selected.has(id));
-                        setSelected(prev=>{
-                          const n=new Set(prev);
-                          if(allPlatSelected){platIds.forEach(id=>n.delete(id));}
-                          else{platIds.forEach(id=>n.add(id));}
-                          return n;
-                        });
+                        setSelected(prev=>{ const n=new Set(prev); if(allPlatSelected){platIds.forEach(id=>n.delete(id));}else{platIds.forEach(id=>n.add(id));} return n; });
                       }}
-                      className={`text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${
-                        itemsInThisPage.length>0&&itemsInThisPage.every(l=>selected.has(l.id))
-                          ? `${style.icon} border-current bg-current/10`
-                          : "text-[#7a7268] border-[#2e2c29] hover:text-[#e8e2d8]"
-                      }`}>
+                      className={`text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${itemsInThisPage.length>0&&itemsInThisPage.every(l=>selected.has(l.id))?`${style.icon} border-current bg-current/10`:"text-[#7a7268] border-[#2e2c29] hover:text-[#e8e2d8]"}`}>
                       Selecionar
                     </button>
                     <ChevronDown size={14} className={`transition-transform ${isOpen?"rotate-180":""} ${style.icon}`} />
@@ -1198,18 +1189,9 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
                     onClick={()=>{
                       const platIds = itemsInThisPage.map(l=>l.id);
                       const allPlatSelected = platIds.length>0&&platIds.every(id=>selected.has(id));
-                      setSelected(prev=>{
-                        const n=new Set(prev);
-                        if(allPlatSelected){platIds.forEach(id=>n.delete(id));}
-                        else{platIds.forEach(id=>n.add(id));}
-                        return n;
-                      });
+                      setSelected(prev=>{ const n=new Set(prev); if(allPlatSelected){platIds.forEach(id=>n.delete(id));}else{platIds.forEach(id=>n.add(id));} return n; });
                     }}
-                    className={`text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${
-                      itemsInThisPage.length>0&&itemsInThisPage.every(l=>selected.has(l.id))
-                        ? `${style.icon} border-current bg-current/10`
-                        : "text-[#7a7268] border-[#2e2c29] hover:text-[#e8e2d8]"
-                    }`}>
+                    className={`text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${itemsInThisPage.length>0&&itemsInThisPage.every(l=>selected.has(l.id))?`${style.icon} border-current bg-current/10`:"text-[#7a7268] border-[#2e2c29] hover:text-[#e8e2d8]"}`}>
                     Selecionar desta plataforma
                   </button>
                   <ChevronDown size={14} className={`transition-transform ${isOpen?"rotate-180":""} ${style.icon}`} />
@@ -1219,7 +1201,7 @@ function LeadAccordion({ leads, paginatedLeads, search, platFilter, dateFrom, da
                 <div className="divide-y divide-[#2e2c29]/50">
                   {/* Cabeçalho fixo alinhado com as colunas de dados */}
                   <div className="w-full overflow-x-auto pb-2">
-                  <div className={`flex items-center gap-3 px-4 py-2 bg-[#111010]/60 ${plat.toLowerCase().includes("google local") ? "min-w-[950px]" : "min-w-[800px]"}`}>
+                  <div className="flex items-center gap-3 px-4 py-2 bg-[#111010]/60 min-w-[800px]">
                     <div className="w-3.5 h-3.5 shrink-0" />
                     <div className={`flex-1 min-w-0 grid ${plat.toLowerCase().includes("google local") ? "grid-cols-[minmax(150px,_2fr)_minmax(130px,_1fr)_minmax(150px,_2fr)_minmax(100px,_1fr)_minmax(110px,_1fr)]" : "grid-cols-[minmax(150px,_2fr)_minmax(130px,_1fr)_minmax(150px,_2fr)_minmax(100px,_1fr)]"} gap-x-4`}>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Nome</p>
@@ -2583,9 +2565,10 @@ export default function Home() {
   const [allLeadsForDashboard, setAllLeadsForDashboard] = useState<Lead[]>([]);
   const [leadSearch, setLeadSearch]     = useState("");
   const [platFilter, setPlatFilter]     = useState("");
-  const [dateFrom, setDateFrom]         = useState("");
-  const [dateTo, setDateTo]             = useState("");
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("max");
+  const _initDates = (() => { const fmt=(d:Date)=>d.toISOString().slice(0,10); const yesterday=new Date(); yesterday.setDate(yesterday.getDate()-1); const from=new Date(yesterday); from.setDate(yesterday.getDate()-6); return {from:fmt(from),to:fmt(yesterday)}; })();
+  const [dateFrom, setDateFrom]         = useState(_initDates.from);
+  const [dateTo, setDateTo]             = useState(_initDates.to);
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("7d");
   const [itemsPerPage, setItemsPerPage] = useState(10); // Padrão: 10 itens por página
 
   const [clientSearch, setClientSearch] = useState("");
@@ -2817,7 +2800,8 @@ export default function Home() {
   const handleSelectCliente = useCallback((cliente: Cliente) => {
     scrollPosRef.current = window.scrollY; // Salva a posição
     setClienteAtivo(cliente); setLeadSearch(""); setPlatFilter("");
-    setDateFrom(""); setDateTo(""); setPeriodPreset("max"); setCurrentPage(1);
+    const _fmt=(d:Date)=>d.toISOString().slice(0,10); const _y=new Date(); _y.setDate(_y.getDate()-1); const _f=new Date(_y); _f.setDate(_y.getDate()-6);
+    setDateFrom(_fmt(_f)); setDateTo(_fmt(_y)); setPeriodPreset("7d"); setCurrentPage(1);
     fetchLeads(cliente.id);
     window.scrollTo({ top: 0, behavior: "smooth" }); // Sobe suavemente
   }, [fetchLeads]);
@@ -3158,7 +3142,8 @@ export default function Home() {
 
   const backToDashboard = () => {
     setClienteAtivo(null); setLeadSearch(""); setPlatFilter("");
-    setDateFrom(""); setDateTo(""); setPeriodPreset("max");
+    const _fmt=(d:Date)=>d.toISOString().slice(0,10); const _y=new Date(); _y.setDate(_y.getDate()-1); const _f=new Date(_y); _f.setDate(_y.getDate()-6);
+    setDateFrom(_fmt(_f)); setDateTo(_fmt(_y)); setPeriodPreset("7d");
     setTimeout(() => {
       window.scrollTo({ top: scrollPosRef.current, behavior: "instant" });
     }, 10); // Devolve pro pixel exato
