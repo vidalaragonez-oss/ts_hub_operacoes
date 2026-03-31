@@ -1534,8 +1534,9 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
 
   return (
     <div onClick={onSelect}
-      className={`rounded-2xl border p-4 grid grid-rows-[auto_1fr_auto] gap-3 cursor-pointer transition-all duration-200 min-h-[178px] hover:border-amber-500/40 hover:shadow-[0_4px_20px_rgba(245,166,35,0.08)] ${isDragging?"bg-zinc-800 border-amber-500/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)]":temAlerta?"border-red-500/30 bg-red-500/5":isInactive?"border-red-500/30 bg-[#1e1b1b] opacity-60":!client.platforms?.length?"border-amber-500/25 bg-[#1e1d1a]":"border-[#2e2c29] bg-[#1a1917]"}`}>
-      <div className="flex items-start justify-between gap-2">
+      className={`rounded-2xl border p-4 flex flex-col gap-2 cursor-pointer transition-all duration-200 h-[220px] overflow-hidden hover:border-amber-500/40 hover:shadow-[0_4px_20px_rgba(245,166,35,0.08)] ${isDragging?"bg-zinc-800 border-amber-500/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)]":temAlerta?"border-red-500/30 bg-red-500/5":isInactive?"border-red-500/30 bg-[#1e1b1b] opacity-60":!client.platforms?.length?"border-amber-500/25 bg-[#1e1d1a]":"border-[#2e2c29] bg-[#1a1917]"}`}>
+      {/* Row 1 — Nome + Status + Menu */}
+      <div className="flex items-start justify-between gap-2 shrink-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <MetaDot accountId={client.meta_ad_account_id} data={metaData} onRefresh={onRefreshMeta} />
@@ -1555,18 +1556,24 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
           <ClientActionMenu onEdit={onEdit} onDeactivate={onDeactivate} onDelete={onDelete} isInactive={isInactive}/>
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5 content-start">
-        {uniquePlats.length?uniquePlats.map(p=>(
-          <span key={p.key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${PLATFORM_CHIP_COLOR[p.key]}`}>
-            {PLATFORM_SVG[p.key]}{p.label}
-          </span>
-        )):<span className="text-[#7a7268] text-xs italic">Nenhuma plataforma</span>}
+
+      {/* Row 2 — Plataformas + MetaSummary + MetaGoalBar (cresce e corta o excesso) */}
+      <div className="flex-1 flex flex-col gap-1.5 min-h-0 overflow-hidden">
+        <div className="flex flex-wrap gap-1.5 content-start">
+          {uniquePlats.length?uniquePlats.map(p=>(
+            <span key={p.key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${PLATFORM_CHIP_COLOR[p.key]}`}>
+              {PLATFORM_SVG[p.key]}{p.label}
+            </span>
+          )):<span className="text-[#7a7268] text-xs italic">Nenhuma plataforma</span>}
+        </div>
+        <MetaSummary data={metaData} />
+        {client.meta_leads_mensal != null && (
+          <MetaGoalBar meta={client.meta_leads_mensal} leadsDoMes={leadsDoMes ?? 0} />
+        )}
       </div>
-      <MetaSummary data={metaData} />
-      {client.meta_leads_mensal != null && (
-        <MetaGoalBar meta={client.meta_leads_mensal} leadsDoMes={leadsDoMes ?? 0} />
-      )}
-      <div className="flex items-center gap-2 flex-wrap border-t border-[#2e2c29]/50 pt-2">
+
+      {/* Row 3 — Gestores + Data (sempre no rodapé) */}
+      <div className="flex items-center gap-2 flex-wrap border-t border-[#2e2c29]/50 pt-2 shrink-0">
         <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#201f1d] border border-[#2e2c29] text-[#7a7268]">
           <Layers size={10} /> {client.gestor}
         </span>
