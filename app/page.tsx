@@ -101,12 +101,27 @@ const PLATFORM_SVG: Record<PlatformKey, React.ReactNode> = {
       <path d="M34.5858 17.5858L21.4142 30.7574L14.8284 24.1716L12 27L21.4142 36.4142L37.4142 20.4142L34.5858 17.5858Z" fill="white" />
     </svg>
   ),
+  nextdoor: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="11" fill="#00B246" />
+      <path d="M7 12.5L10.5 16L17 9" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  thumbtack: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="11" fill="#009FD9" />
+      <path d="M12 6V14M12 14L9 11M12 14L15 11" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="12" cy="17" r="1.2" fill="white"/>
+    </svg>
+  ),
 };
 
 const PLATFORM_CHIP_COLOR: Record<PlatformKey, string> = {
-  meta:   "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  google: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  gls:    "bg-purple-500/15 text-purple-400 border-purple-500/30",
+  meta:      "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  google:    "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  gls:       "bg-purple-500/15 text-purple-400 border-purple-500/30",
+  nextdoor:  "bg-green-500/15 text-green-400 border-green-500/30",
+  thumbtack: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
 };
 
 function getPlatformBadgeStyle(plataforma: string): string {
@@ -115,6 +130,8 @@ function getPlatformBadgeStyle(plataforma: string): string {
   if (p.includes("google local") || p.includes("gls"))     return "bg-purple-500/15 text-purple-400 border-purple-500/30";
   if (p.includes("google"))                                return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
   if (p.includes("elementor"))                             return "bg-pink-500/15 text-pink-400 border-pink-500/30";
+  if (p.includes("nextdoor"))                              return "bg-green-500/15 text-green-400 border-green-500/30";
+  if (p.includes("thumbtack"))                             return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
   return "bg-amber-500/15 text-amber-400 border-amber-500/30";
 }
 
@@ -1620,7 +1637,7 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
         </div>
       </div>
 
-      {/* Row 2 — Plataformas + MetaSummary (área flexível, sem MetaGoalBar aqui) */}
+      {/* Row 2 — Plataformas + Orçamento Planejado + Meta de Leads */}
       <div className="flex-1 flex flex-col gap-1.5 min-h-0 overflow-hidden mt-2">
         <div className="flex flex-wrap gap-1.5 content-start">
           {uniquePlats.length ? uniquePlats.map(p=>(
@@ -1629,7 +1646,29 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
             </span>
           )) : <span className="text-[#7a7268] text-xs italic">Nenhuma plataforma</span>}
         </div>
-        <MetaSummary data={metaData} />
+        {/* Orçamento Mensal Planejado + Meta de Leads (estático, sem dados em tempo real) */}
+        {(() => {
+          const totalOrc = (client.verba_meta_ads ?? 0) + (client.verba_gls ?? 0) + ((client as Cliente & { verba_outros?: number | null }).verba_outros ?? 0);
+          const temOrc = totalOrc > 0;
+          const temMeta = (client.meta_leads_mensal ?? 0) > 0;
+          if (!temOrc && !temMeta) return null;
+          return (
+            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+              {temOrc && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/8 border border-amber-500/20 text-amber-400">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  {totalOrc.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
+                </span>
+              )}
+              {temMeta && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/8 border border-blue-500/25 text-blue-400">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                  Meta: {client.meta_leads_mensal} leads
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Row 3 — MetaGoalBar ancorada acima do rodapé (só aparece se tiver meta) */}
@@ -1748,6 +1787,14 @@ const CANONICAL_PLATFORM_DEFS: { key: PlatformKey; label: string; campaigns: str
     key: "gls", label: "Google Local Services",
     campaigns: ["Local Service Ads (GLS)", "Local Awareness"],
   },
+  {
+    key: "nextdoor", label: "Nextdoor Ads",
+    campaigns: ["Nextdoor Local Deals", "Nextdoor Awareness"],
+  },
+  {
+    key: "thumbtack", label: "Thumbtack",
+    campaigns: ["Thumbtack Leads", "Thumbtack Pro Spotlight"],
+  },
 ];
 
 function getCampanhaPlatKey(camp: string): PlatformKey | null {
@@ -1758,7 +1805,7 @@ function getCampanhaPlatKey(camp: string): PlatformKey | null {
 }
 
 function buildEditCamps(cliente: Cliente): Record<PlatformKey, string[]> {
-  const result: Record<PlatformKey, string[]> = { meta: [], google: [], gls: [] };
+  const result: Record<PlatformKey, string[]> = { meta: [], google: [], gls: [], nextdoor: [], thumbtack: [] };
 
   if (Array.isArray(cliente.tipo_campanha) && cliente.tipo_campanha.length > 0) {
     for (const camp of cliente.tipo_campanha) {
@@ -1779,9 +1826,11 @@ function buildEditCamps(cliente: Cliente): Record<PlatformKey, string[]> {
 }
 
 const CAMP_CHIP_COLOR: Record<PlatformKey, string> = {
-  meta:   "bg-blue-500/10 text-blue-300 border-blue-500/20",
-  google: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
-  gls:    "bg-purple-500/10 text-purple-300 border-purple-500/20",
+  meta:      "bg-blue-500/10 text-blue-300 border-blue-500/20",
+  google:    "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+  gls:       "bg-purple-500/10 text-purple-300 border-purple-500/20",
+  nextdoor:  "bg-green-500/10 text-green-300 border-green-500/20",
+  thumbtack: "bg-cyan-500/10 text-cyan-300 border-cyan-500/20",
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1830,6 +1879,11 @@ function EditClienteModal({
   );
   const [verbaGls, setVerbaGls] = useState<string>(
     cliente.verba_gls != null ? String(cliente.verba_gls) : ""
+  );
+  const [verbaOutros, setVerbaOutros] = useState<string>(
+    (cliente as Cliente & { verba_outros?: number | null }).verba_outros != null
+      ? String((cliente as Cliente & { verba_outros?: number | null }).verba_outros)
+      : ""
   );
 
   const togglePlatform = (key: PlatformKey) => {
@@ -1885,8 +1939,9 @@ function EditClienteModal({
         status: newStatus,
         tipo_campanha: tipoCampanhaArray.length > 0 ? tipoCampanhaArray.join(',') : null,
         meta_leads_mensal: metaLeadsMensal !== "" ? Number(metaLeadsMensal) : null,
-        verba_meta_ads:    verbaMeta !== "" ? Number(verbaMeta) : null,
-        verba_gls:         verbaGls  !== "" ? Number(verbaGls)  : null,
+        verba_meta_ads:    verbaMeta   !== "" ? Number(verbaMeta)   : null,
+        verba_gls:         verbaGls    !== "" ? Number(verbaGls)    : null,
+        verba_outros:      verbaOutros !== "" ? Number(verbaOutros) : null,
       };
 
       const { data, error } = await supabase
@@ -2125,6 +2180,19 @@ function EditClienteModal({
                 className="w-full bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-purple-500/50 transition-colors"
               />
             </div>
+          </div>
+          {/* Outras verbas */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-[#4a4844] font-medium">Outras Verbas (R$)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={verbaOutros}
+              onChange={e => setVerbaOutros(e.target.value)}
+              placeholder="Ex: 500.00"
+              className="w-full bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-amber-500/50 transition-colors"
+            />
           </div>
         </div>
 
@@ -2580,6 +2648,8 @@ function normalizeCliente(raw: Record<string, unknown>): Cliente {
     meta_leads_mensal:  raw.meta_leads_mensal  != null ? Number(raw.meta_leads_mensal)  : null,
     verba_meta_ads:     raw.verba_meta_ads     != null ? Number(raw.verba_meta_ads)     : null,
     verba_gls:          raw.verba_gls          != null ? Number(raw.verba_gls)          : null,
+    verba_outros:       raw.verba_outros       != null ? Number(raw.verba_outros)       : null,
+    gls_account_id:     (raw.gls_account_id    as string) ?? null,
   } as Cliente;
 }
 
@@ -2775,7 +2845,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from("clientes")
-        .select("id, nome, operacao_id, gestor, gestor_estrategico, platforms, status, created_at, ordem, tipo_campanha, alerta_pagamento, meta_ad_account_id, meta_access_token, meta_status, meta_leads_mensal, verba_meta_ads, verba_gls")
+        .select("id, nome, operacao_id, gestor, gestor_estrategico, platforms, status, created_at, ordem, tipo_campanha, alerta_pagamento, meta_ad_account_id, meta_access_token, meta_status, meta_leads_mensal, verba_meta_ads, verba_gls, verba_outros, gls_account_id")
         .eq("operacao_id",operacaoId)
         .order("ordem",{ascending:true,nullsFirst:false})
         .order("created_at",{ascending:true});
@@ -3638,6 +3708,41 @@ export default function Home() {
                 <div className="space-y-3 flex-1 min-w-0">
                   <h2 className="text-xl font-extrabold tracking-tight">{clienteAtivo.nome}</h2>
 
+                  {/* ── Orçamento Total Planejado — banner de referência estático ── */}
+                  {(() => {
+                    const vm = clienteAtivo.verba_meta_ads ?? 0;
+                    const vg = clienteAtivo.verba_gls ?? 0;
+                    const vo = (clienteAtivo as Cliente & { verba_outros?: number | null }).verba_outros ?? 0;
+                    const total = vm + vg + vo;
+                    if (total <= 0) return null;
+                    return (
+                      <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/6 border border-amber-500/20">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-amber-500/60 flex items-center gap-1">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                          Orçamento Mensal Planejado
+                        </span>
+                        <span className="text-sm font-extrabold text-amber-400">
+                          {total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                        </span>
+                        {vm > 0 && (
+                          <span className="text-[9px] text-[#7a7268] font-semibold">
+                            Meta {vm.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
+                          </span>
+                        )}
+                        {vg > 0 && (
+                          <span className="text-[9px] text-[#7a7268] font-semibold">
+                            · GLS {vg.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
+                          </span>
+                        )}
+                        {vo > 0 && (
+                          <span className="text-[9px] text-[#7a7268] font-semibold">
+                            · Outros {vo.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* ── Barra de Meta Mensal no detalhe (base D-1) ── */}
                   {clienteAtivo.meta_leads_mensal != null && clienteAtivo.meta_leads_mensal > 0 && (() => {
                     // Usa apenas o valor do batch (D-1), consistente com o pacing dos cards
@@ -3711,7 +3816,7 @@ export default function Home() {
 
                 <div className="flex sm:flex-col gap-2 shrink-0 flex-wrap">
                 
-                  <button onClick={()=>setEditModal(clienteAtivo)}
+                  <button onClick={()=>setClienteModal({mode:"edit",client:clienteAtivo})}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#201f1d] border border-amber-500/30 text-amber-400 text-xs font-semibold hover:bg-amber-500/10 hover:border-amber-500/60 transition-colors whitespace-nowrap">
                     <Pencil size={14} /> Editar
                   </button>
