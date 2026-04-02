@@ -521,6 +521,7 @@ export function ClienteModal({
     initial?.meta_leads_mensal != null ? String(initial.meta_leads_mensal) : ""
   );
   const [verbaMeta, setVerbaMeta]         = useState<string>(initial?.verba_meta_ads != null ? String(initial.verba_meta_ads) : "");
+  const [verbaGoogle, setVerbaGoogle]     = useState<string>("");
   const [verbaGls, setVerbaGls]           = useState<string>(initial?.verba_gls      != null ? String(initial.verba_gls)      : "");
   const [verbaNextdoor, setVerbaNextdoor] = useState<string>(initial?.verba_outros   != null && (initial?.platforms ?? []).some(p => p.key === 'nextdoor') ? String(initial.verba_outros) : "");
   const [verbaThumbtack, setVerbaThumbtack] = useState<string>(initial?.verba_outros != null && (initial?.platforms ?? []).some(p => p.key === 'thumbtack') ? String(initial.verba_outros) : "");
@@ -573,6 +574,7 @@ export function ClienteModal({
         setCamps(c => ({ ...c, [key]: [] })); // limpa campanhas
         // Reseta verba da plataforma desmarcada IMEDIATAMENTE
         if (key === 'meta')      setVerbaMeta("");
+        if (key === 'google')    setVerbaGoogle("");
         if (key === 'gls')       setVerbaGls("");
         if (key === 'nextdoor')  setVerbaNextdoor("");
         if (key === 'thumbtack') setVerbaThumbtack("");
@@ -617,9 +619,10 @@ export function ClienteModal({
       meta_leads_mensal: metaLeadsMensal !== "" ? Number(metaLeadsMensal) : null,
       verba_meta_ads:    verbaMeta      !== "" && activePlats.has('meta')      ? Number(verbaMeta)      : null,
       verba_gls:         verbaGls       !== "" && activePlats.has('gls')       ? Number(verbaGls)       : null,
-      // verba_outros agrega: Nextdoor + Thumbtack + campo genérico "Outros"
+      // verba_outros agrega: Google Ads + Nextdoor + Thumbtack + campo genérico "Outros"
       verba_outros: (() => {
-        const v = (verbaNextdoor  !== "" && activePlats.has('nextdoor')  ? Number(verbaNextdoor)  : 0)
+        const v = (verbaGoogle    !== "" && activePlats.has('google')    ? Number(verbaGoogle)    : 0)
+                + (verbaNextdoor  !== "" && activePlats.has('nextdoor')  ? Number(verbaNextdoor)  : 0)
                 + (verbaThumbtack !== "" && activePlats.has('thumbtack') ? Number(verbaThumbtack) : 0)
                 + (verbaOutros    !== ""                                  ? Number(verbaOutros)    : 0);
         return v > 0 ? v : null;
@@ -903,14 +906,12 @@ export function ClienteModal({
               const symbol = moeda === 'USD' ? 'US$' : 'R$';
               const platVerbas: { platKey: PlatformKey; label: string; value: string; setter: (v: string) => void; borderCls: string }[] = [
                 { platKey: 'meta',      label: `Verba Meta Ads (${symbol})`,   value: verbaMeta,      setter: setVerbaMeta,      borderCls: 'focus:border-blue-500/50'    },
+                { platKey: 'google',    label: `Verba Google Ads (${symbol})`, value: verbaGoogle,    setter: setVerbaGoogle,    borderCls: 'focus:border-emerald-500/50' },
                 { platKey: 'gls',       label: `Verba GLS (${symbol})`,        value: verbaGls,       setter: setVerbaGls,       borderCls: 'focus:border-purple-500/50'  },
                 { platKey: 'nextdoor',  label: `Verba Nextdoor (${symbol})`,   value: verbaNextdoor,  setter: setVerbaNextdoor,  borderCls: 'focus:border-green-500/50'   },
                 { platKey: 'thumbtack', label: `Verba Thumbtack (${symbol})`,  value: verbaThumbtack, setter: setVerbaThumbtack, borderCls: 'focus:border-cyan-500/50'    },
               ];
               const activeVerbas = platVerbas.filter(v => activePlats.has(v.platKey));
-              // Calcula total: soma todos os ativos + outros
-              const totalOrc = activeVerbas.reduce((acc, v) => acc + (v.value !== "" ? Number(v.value) : 0), 0)
-                + (verbaOutros !== "" ? Number(verbaOutros) : 0);
               // Grid: 1 coluna se só 1 ativo+outros, 2 colunas se mais
               const totalCols = activeVerbas.length + 1; // +1 para "Outros"
               const gridCls = totalCols === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
@@ -937,8 +938,9 @@ export function ClienteModal({
               );
             })()}
             {/* Budget total preview — moeda exclusiva do seletor */}
-            {(verbaMeta !== "" || verbaGls !== "" || verbaNextdoor !== "" || verbaThumbtack !== "" || verbaOutros !== "") && (() => {
+            {(verbaMeta !== "" || verbaGoogle !== "" || verbaGls !== "" || verbaNextdoor !== "" || verbaThumbtack !== "" || verbaOutros !== "") && (() => {
               const total = (verbaMeta      !== "" ? Number(verbaMeta)      : 0)
+                + (verbaGoogle    !== "" ? Number(verbaGoogle)    : 0)
                 + (verbaGls       !== "" ? Number(verbaGls)       : 0)
                 + (verbaNextdoor  !== "" ? Number(verbaNextdoor)  : 0)
                 + (verbaThumbtack !== "" ? Number(verbaThumbtack) : 0)
