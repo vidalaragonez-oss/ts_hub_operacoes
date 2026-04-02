@@ -152,18 +152,14 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Buscar leads dos formulários (para auto-sync) ──────────────────────────
+    // FLUXO CORRETO: Leads pertencem à Página, não à Conta de Anúncios.
+    // Token → /me/accounts (Páginas) → /{pageId}/leadgen_forms → /{formId}/leads
     if (action === "leads") {
-      const accountId = searchParams.get("account_id");
-      if (!accountId) return NextResponse.json({ error: "account_id obrigatório" }, { status: 400 });
+      if (!searchParams.get("account_id")) {
+        return NextResponse.json({ error: "account_id obrigatório" }, { status: 400 });
+      }
 
-      // 1. Busca formulários da conta
-      const formsData = await metaFetch(`/${accountId}/leadgen_forms`, {
-        access_token: token,
-        fields: "id,name,status",
-        limit: "100",
-      });
-
-      const leads: {
+      type LeadRow = {
         meta_lead_id: string;
         nome: string;
         email: string;
@@ -171,101 +167,137 @@ export async function GET(req: NextRequest) {
         created_time: string;
         form_id: string;
         form_name: string;
-      }[] = [];
+      };
 
-      // 2. Para cada formulário, busca os leads (apenas últimos 15 dias)
+      const leads: LeadRow[] = [];
+
+      // Filtro temporal: apenas leads dos últimos 15 dias (evita timeout)
       const fifteenDaysAgo = Math.floor((Date.now() - 15 * 24 * 60 * 60 * 1000) / 1000);
       const leadsFiltering = JSON.stringify([
         { field: "time_created", operator: "GREATER_THAN", value: fifteenDaysAgo },
       ]);
 
-      for (const form of (formsData.data ?? []) as { id: string; name: string }[]) {
-        try {
-          let cursor: string | null = null;
-          let page = 0;
-          while (page < 5) { // máximo 5 páginas por formulário (500 leads)
-            const params: Record<string, string> = {
-              access_token: token,
-              fields: "id,field_data,created_time",
-              limit: "100",
-              filtering: leadsFiltering,
-            };
-            if (cursor) params.after = cursor;
+      // Helper: parseia e empilha os leads de um formulário
+      async function fetchLeadsForForm(formId: string, formName: string): Promise<void> {
+        let cursor: string | null = null;
+        let pageCount = 0;
 
-            let leadsData: Record<string, unknown>;
-            try {
-              leadsData = await metaFetch(`/${form.id}/leads`, params);
-            } catch (fetchErr: unknown) {
-              const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-              const isPermissionError =
-                errMsg.toLowerCase().includes("permission") ||
-                errMsg.toLowerCase().includes("leads_retrieval") ||
-                errMsg.toLowerCase().includes("oauth");
-              if (isPermissionError) {
-                console.error(
-                  `[Meta Leads] Erro de permissão ao buscar leads do formulário ${form.id} (${form.name}). ` +
-                  `Verifique se o token possui a permissão 'leads_retrieval'. Detalhes: ${errMsg}`
-                );
-              } else {
-                console.error(`[Meta Leads] Erro ao buscar leads do formulário ${form.id}: ${errMsg}`);
-              }
-              break; // interrompe paginação deste formulário, vai pro próximo
-            }
-            const rows = (leadsData.data ?? []) as {
-              id: string;
-              created_time: string;
-              field_data: { name: string; values: string[] }[];
-            }[];
+        while (pageCount < 5) {
+          const params: Record<string, string> = {
+            access_token: token,
+            fields: "id,field_data,created_time",
+            limit: "100",
+            filtering: leadsFiltering,
+          };
+          if (cursor) params.after = cursor;
 
-            for (const row of rows) {
-              // Mapeamento flexível dos field_data
-              let nome = "";
-              let email = "";
-              let telefone = "";
-
-              for (const field of (row.field_data ?? [])) {
-                const key = (field.name ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-                const val = field.values?.[0] ?? "";
-                if (!val) continue;
-
-                if (["fullname", "nome", "name", "firstname"].includes(key)) {
-                  nome = nome ? `${nome} ${val}` : val;
-                } else if (key === "lastname" && nome) {
-                  nome = `${nome} ${val}`;
-                } else if (["email", "emailaddress"].includes(key)) {
-                  email = val;
-                } else if (["phonenumber", "phone", "telefone", "celular", "whatsapp"].includes(key)) {
-                  telefone = val;
-                }
-              }
-
-              // Fallback por padrão no valor se campo não mapeado
-              if (!email) {
-                const emailField = row.field_data?.find(f => (f.values?.[0] ?? "").includes("@"));
-                if (emailField) email = emailField.values?.[0] ?? "";
-              }
-              if (!telefone) {
-                const phoneField = row.field_data?.find(f => /^[\+\(\)0-9\-\.\s]{9,20}$/.test(f.values?.[0] ?? ""));
-                if (phoneField) telefone = phoneField.values?.[0] ?? "";
-              }
-
-              leads.push({
-                meta_lead_id: row.id,
-                nome:         nome || "Lead Meta",
-                email,
-                telefone,
-                created_time: row.created_time,
-                form_id:      form.id,
-                form_name:    form.name,
-              });
-            }
-
-            cursor = leadsData.paging?.cursors?.after ?? null;
-            if (!cursor || !leadsData.paging?.next) break;
-            page++;
+          let leadsData: Record<string, unknown>;
+          try {
+            leadsData = await metaFetch(`/${formId}/leads`, params);
+          } catch (fetchErr: unknown) {
+            const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+            const isPermError =
+              errMsg.toLowerCase().includes("permission") ||
+              errMsg.toLowerCase().includes("leads_retrieval") ||
+              errMsg.toLowerCase().includes("oauth");
+            console.error(
+              isPermError
+                ? `[Meta Leads] Sem permissão 'leads_retrieval' no formulário ${formId} (${formName}): ${errMsg}`
+                : `[Meta Leads] Erro no formulário ${formId}: ${errMsg}`
+            );
+            break;
           }
-        } catch {
-          // Formulário sem permissão ou sem leads — segue
+
+          const rows = (leadsData.data ?? []) as {
+            id: string;
+            created_time: string;
+            field_data: { name: string; values: string[] }[];
+          }[];
+
+          for (const row of rows) {
+            let nome = "";
+            let email = "";
+            let telefone = "";
+
+            for (const field of (row.field_data ?? [])) {
+              const key = (field.name ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+              const val = field.values?.[0] ?? "";
+              if (!val) continue;
+              if (["fullname", "nome", "name", "firstname"].includes(key)) {
+                nome = nome ? `${nome} ${val}` : val;
+              } else if (key === "lastname" && nome) {
+                nome = `${nome} ${val}`;
+              } else if (["email", "emailaddress"].includes(key)) {
+                email = val;
+              } else if (["phonenumber", "phone", "telefone", "celular", "whatsapp"].includes(key)) {
+                telefone = val;
+              }
+            }
+            if (!email) {
+              const ef = row.field_data?.find(f => (f.values?.[0] ?? "").includes("@"));
+              if (ef) email = ef.values?.[0] ?? "";
+            }
+            if (!telefone) {
+              const pf = row.field_data?.find(f =>
+                /^[\+\(\)0-9\-\.\s]{9,20}$/.test(f.values?.[0] ?? "")
+              );
+              if (pf) telefone = pf.values?.[0] ?? "";
+            }
+
+            leads.push({
+              meta_lead_id: row.id,
+              nome:         nome || "Lead Meta",
+              email,
+              telefone,
+              created_time: row.created_time,
+              form_id:      formId,
+              form_name:    formName,
+            });
+          }
+
+          const paging = leadsData.paging as { cursors?: { after?: string }; next?: string } | undefined;
+          cursor = paging?.cursors?.after ?? null;
+          if (!cursor || !paging?.next) break;
+          pageCount++;
+        }
+      }
+
+      // 1. Busca as Páginas gerenciadas pelo token
+      let pages: { id: string; name: string }[] = [];
+      try {
+        const pagesData = await metaFetch("/me/accounts", {
+          access_token: token,
+          fields: "id,name",
+          limit: "100",
+        });
+        pages = (pagesData.data ?? []) as { id: string; name: string }[];
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[Meta Leads] Erro ao listar páginas do token: ${msg}`);
+      }
+
+      // 2. Para cada Página → formulários → leads
+      for (const pg of pages) {
+        let forms: { id: string; name: string }[] = [];
+        try {
+          const formsData = await metaFetch(`/${pg.id}/leadgen_forms`, {
+            access_token: token,
+            fields: "id,name,status",
+            limit: "100",
+          });
+          forms = (formsData.data ?? []) as { id: string; name: string }[];
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[Meta Leads] Erro ao buscar formulários da página ${pg.id} (${pg.name}): ${msg}`);
+          continue;
+        }
+
+        for (const form of forms) {
+          try {
+            await fetchLeadsForForm(form.id, form.name);
+          } catch {
+            // formulário sem leads acessíveis — segue
+          }
         }
       }
 
