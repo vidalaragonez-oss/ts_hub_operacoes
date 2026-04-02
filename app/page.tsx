@@ -1648,16 +1648,18 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
         </div>
         {/* Orçamento Mensal Planejado + Meta de Leads (estático, sem dados em tempo real) */}
         {(() => {
-          const totalOrc = (client.verba_meta_ads ?? 0) + (client.verba_gls ?? 0) + ((client as Cliente & { verba_outros?: number | null }).verba_outros ?? 0);
+          const totalOrc = (client.verba_meta_ads ?? 0) + (client.verba_gls ?? 0) + (client.verba_outros ?? 0);
           const temOrc = totalOrc > 0;
           const temMeta = (client.meta_leads_mensal ?? 0) > 0;
           if (!temOrc && !temMeta) return null;
+          const orcSymbol = (client.moeda ?? "BRL") === "USD" ? "US$" : "R$";
+          const orcCurrency = (client.moeda ?? "BRL") === "USD" ? "USD" : "BRL";
           return (
             <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
               {temOrc && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/8 border border-amber-500/20 text-amber-400">
                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                  {totalOrc.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
+                  {orcSymbol} {totalOrc.toLocaleString(orcCurrency === "USD" ? "en-US" : "pt-BR", { maximumFractionDigits: 0 })}
                 </span>
               )}
               {temMeta && (
@@ -1735,16 +1737,18 @@ function ClientRow({ client, onSelect, onEdit, onDeactivate, onDelete, onToggleA
           <div className="min-w-0">
             <p className="font-semibold text-[#e8e2d8] text-sm truncate max-w-[160px]">{client.nome}</p>
             {(() => {
-              const totalOrc = (client.verba_meta_ads ?? 0) + (client.verba_gls ?? 0) + ((client as Cliente & { verba_outros?: number | null }).verba_outros ?? 0);
+              const totalOrc = (client.verba_meta_ads ?? 0) + (client.verba_gls ?? 0) + (client.verba_outros ?? 0);
               const temOrc = totalOrc > 0;
               const temMeta = (client.meta_leads_mensal ?? 0) > 0;
               if (!temOrc && !temMeta) return null;
+              const orcSymbol = (client.moeda ?? "BRL") === "USD" ? "US$" : "R$";
+              const orcCurrency = (client.moeda ?? "BRL") === "USD" ? "USD" : "BRL";
               return (
                 <div className="flex items-center gap-1 flex-wrap mt-0.5">
                   {temOrc && (
                     <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/8 border border-amber-500/20 text-amber-400">
                       <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                      {totalOrc.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}
+                      {orcSymbol} {totalOrc.toLocaleString(orcCurrency === "USD" ? "en-US" : "pt-BR", { maximumFractionDigits: 0 })}
                     </span>
                   )}
                   {temMeta && (
@@ -1912,7 +1916,11 @@ function EditClienteModal({
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
+        // Limpa campanhas da plataforma removida
         setCamps(c => ({ ...c, [key]: [] }));
+        // Reseta verba da plataforma removida no estado local
+        if (key === 'meta')    setVerbaMeta("");
+        if (key === 'gls')     setVerbaGls("");
       } else {
         next.add(key);
       }
@@ -2169,38 +2177,36 @@ function EditClienteModal({
             />
           </div>
 
-          {/* Verbas lado a lado */}
+          {/* Verbas lado a lado — grid simétrico, altura padronizada */}
           <div className="grid grid-cols-2 gap-3">
+            {activePlats.has('meta') && (
             <div className="space-y-1.5">
-              <label className="text-[10px] text-[#4a4844] font-medium flex items-center gap-1">
+              <label className="text-[10px] text-[#4a4844] font-medium flex items-center gap-1 min-h-[1.25rem]">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12.073c0-6.627-5.372-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
                 Verba Meta Ads (R$)
               </label>
               <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={verbaMeta}
+                type="number" min="0" step="0.01" value={verbaMeta}
                 onChange={e => setVerbaMeta(e.target.value)}
                 placeholder="Ex: 3000.00"
-                className="w-full bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-blue-500/50 transition-colors"
+                className="w-full h-[42px] bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-blue-500/50 transition-colors"
               />
             </div>
+            )}
+            {activePlats.has('gls') && (
             <div className="space-y-1.5">
-              <label className="text-[10px] text-[#4a4844] font-medium flex items-center gap-1">
+              <label className="text-[10px] text-[#4a4844] font-medium flex items-center gap-1 min-h-[1.25rem]">
                 <svg width="9" height="9" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="20" fill="#34A853"/><path d="M34.5858 17.5858L21.4142 30.7574L14.8284 24.1716L12 27L21.4142 36.4142L37.4142 20.4142L34.5858 17.5858Z" fill="white"/></svg>
                 Verba GLS (R$)
               </label>
               <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={verbaGls}
+                type="number" min="0" step="0.01" value={verbaGls}
                 onChange={e => setVerbaGls(e.target.value)}
                 placeholder="Ex: 1500.00"
-                className="w-full bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-purple-500/50 transition-colors"
+                className="w-full h-[42px] bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-purple-500/50 transition-colors"
               />
             </div>
+            )}
           </div>
           {/* Outras verbas */}
           <div className="space-y-1.5">
