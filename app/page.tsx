@@ -3209,7 +3209,9 @@ export default function Home() {
   };
 
   // ── Auto-Sync: busca leads Meta e faz upsert no Supabase ─────────────────
-  // ── Limpa leads Meta contaminados (de outras páginas) e re-sincroniza ────────
+  // ── Limpa leads Meta contaminados e re-sincroniza APENAS este cliente ────────
+  // SEGURO: só apaga leads com meta_lead_id (vindos da API Meta) deste cliente.
+  // Nunca toca em leads de outros clientes nem em leads manuais (sem meta_lead_id).
   const cleanupAndResyncMetaLeads = async (
     clienteId: string,
     accountId: string,
@@ -3218,28 +3220,28 @@ export default function Home() {
     operacaoNome: string,
   ) => {
     try {
-      toast.loading("🧹 Limpando leads incorretos...", { id: "cleanup" });
+      toast.loading("🧹 Limpando leads Meta incorretos...", { id: "cleanup" });
 
-      // 1. Remove TODOS os leads Meta deste cliente (os contaminados)
+      // Apaga SOMENTE leads com meta_lead_id deste cliente específico
+      // (leads manuais não têm meta_lead_id e não são afetados)
       const { error: delError } = await supabase
         .from("leads")
         .delete()
-        .eq("cliente", clienteId)
-        .eq("plataforma", "Meta Ads")
-        .not("meta_lead_id", "is", null);
+        .eq("cliente", clienteId)          // ← escopo: só este cliente
+        .not("meta_lead_id", "is", null);  // ← só leads vindos da API Meta
 
       if (delError) throw delError;
 
       toast.loading("🔄 Re-sincronizando leads corretos...", { id: "cleanup" });
 
-      // 2. Re-sincroniza com a lógica correta (account-scoped)
+      // Re-sincroniza com a lógica correta (account-scoped)
       await syncMetaLeads(clienteId, accountId, token, operacaoId, operacaoNome);
 
-      // 3. Recarrega os leads da tela
+      // Recarrega leads na tela
       await fetchLeads(clienteId);
-      toast.success("✅ Leads Meta re-sincronizados com sucesso!", { id: "cleanup" });
+      toast.success("✅ Leads Meta re-sincronizados!", { id: "cleanup" });
     } catch (err: unknown) {
-      toast.error(`Erro na limpeza: ${err instanceof Error ? err.message : "Erro desconhecido"}`, { id: "cleanup" });
+      toast.error(`Erro: ${err instanceof Error ? err.message : "Erro desconhecido"}`, { id: "cleanup" });
     }
   };
 
