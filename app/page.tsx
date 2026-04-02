@@ -3209,6 +3209,40 @@ export default function Home() {
   };
 
   // ── Auto-Sync: busca leads Meta e faz upsert no Supabase ─────────────────
+  // ── Limpa leads Meta contaminados (de outras páginas) e re-sincroniza ────────
+  const cleanupAndResyncMetaLeads = async (
+    clienteId: string,
+    accountId: string,
+    token: string | null,
+    operacaoId: string,
+    operacaoNome: string,
+  ) => {
+    try {
+      toast.loading("🧹 Limpando leads incorretos...", { id: "cleanup" });
+
+      // 1. Remove TODOS os leads Meta deste cliente (os contaminados)
+      const { error: delError } = await supabase
+        .from("leads")
+        .delete()
+        .eq("cliente", clienteId)
+        .eq("plataforma", "Meta Ads")
+        .not("meta_lead_id", "is", null);
+
+      if (delError) throw delError;
+
+      toast.loading("🔄 Re-sincronizando leads corretos...", { id: "cleanup" });
+
+      // 2. Re-sincroniza com a lógica correta (account-scoped)
+      await syncMetaLeads(clienteId, accountId, token, operacaoId, operacaoNome);
+
+      // 3. Recarrega os leads da tela
+      await fetchLeads(clienteId);
+      toast.success("✅ Leads Meta re-sincronizados com sucesso!", { id: "cleanup" });
+    } catch (err: unknown) {
+      toast.error(`Erro na limpeza: ${err instanceof Error ? err.message : "Erro desconhecido"}`, { id: "cleanup" });
+    }
+  };
+
   const syncMetaLeads = async (
     clienteId: string,
     accountId: string,
@@ -4061,6 +4095,28 @@ export default function Home() {
                 onFetch={fetchMetaTree}
                 moedaCliente={clienteAtivo.moeda ?? null}
               />
+            )}
+
+            {/* Botão de re-sincronização manual de leads Meta */}
+            {clienteAtivo.meta_ad_account_id && operacaoAtiva && (
+              <div className="flex items-center gap-2 justify-end">
+                <button
+                  onClick={() => cleanupAndResyncMetaLeads(
+                    clienteAtivo.id,
+                    clienteAtivo.meta_ad_account_id!,
+                    clienteAtivo.meta_access_token ?? null,
+                    operacaoAtiva.id,
+                    operacaoAtiva.nome,
+                  )}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-semibold hover:bg-blue-500/20 transition-colors"
+                  title="Limpa leads Meta incorretos e re-sincroniza apenas os leads desta conta"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>
+                  </svg>
+                  Re-sincronizar Leads Meta
+                </button>
+              </div>
             )}
 
             <div className="flex flex-col gap-3">
