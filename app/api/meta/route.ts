@@ -152,12 +152,22 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Buscar leads dos formulários (para auto-sync) ──────────────────────────
-    // FLUXO CORRETO: Leads pertencem à Página, não à Conta de Anúncios.
-    // Token → /me/accounts (Páginas) → /{pageId}/leadgen_forms → /{formId}/leads
+    //
+    // ARQUITETURA CORRETA DA API DO META:
+    //   Formulários de lead (leadgen_forms) pertencem a uma PÁGINA do Facebook,
+    //   nunca à Conta de Anúncios (act_xxx).
+    //
+    // ESTRATÉGIAS (em cascata):
+    //   A) /me/accounts  — User Token com pages_show_list → lista todas as Páginas
+    //   B) /{accountId}/campaigns?fields=promoted_object → extrai page_id das campanhas
+    //   C) /me → tenta o próprio token como Page Token
+    //
+    // Para cada Página descoberta:
+    //   GET /{pageId}/leadgen_forms → GET /{formId}/leads (filtro 15 dias)
+    //
     if (action === "leads") {
-      if (!searchParams.get("account_id")) {
-        return NextResponse.json({ error: "account_id obrigatório" }, { status: 400 });
-      }
+      const accountId = searchParams.get("account_id");
+      if (!accountId) return NextResponse.json({ error: "account_id obrigatório" }, { status: 400 });
 
       type LeadRow = {
         meta_lead_id: string;
@@ -170,18 +180,15 @@ export async function GET(req: NextRequest) {
       };
 
       const leads: LeadRow[] = [];
-
-      // Filtro temporal: apenas leads dos últimos 15 dias (evita timeout)
       const fifteenDaysAgo = Math.floor((Date.now() - 15 * 24 * 60 * 60 * 1000) / 1000);
       const leadsFiltering = JSON.stringify([
         { field: "time_created", operator: "GREATER_THAN", value: fifteenDaysAgo },
       ]);
 
-      // Helper: parseia e empilha os leads de um formulário
+      // ── Helper: busca e empilha leads de um formulário específico ──────────
       async function fetchLeadsForForm(formId: string, formName: string): Promise<void> {
         let cursor: string | null = null;
         let pageCount = 0;
-
         while (pageCount < 5) {
           const params: Record<string, string> = {
             access_token: token,
@@ -190,7 +197,6 @@ export async function GET(req: NextRequest) {
             filtering: leadsFiltering,
           };
           if (cursor) params.after = cursor;
-
           let leadsData: Record<string, unknown>;
           try {
             leadsData = await metaFetch(`/${formId}/leads`, params);
@@ -202,59 +208,44 @@ export async function GET(req: NextRequest) {
               errMsg.toLowerCase().includes("oauth");
             console.error(
               isPermError
-                ? `[Meta Leads] Sem permissão 'leads_retrieval' no formulário ${formId} (${formName}): ${errMsg}`
-                : `[Meta Leads] Erro no formulário ${formId}: ${errMsg}`
+                ? `[Meta Leads] Sem permissão 'leads_retrieval' no form ${formId} (${formName}): ${errMsg}`
+                : `[Meta Leads] Erro ao buscar leads do form ${formId}: ${errMsg}`
             );
             break;
           }
-
           const rows = (leadsData.data ?? []) as {
             id: string;
             created_time: string;
             field_data: { name: string; values: string[] }[];
           }[];
-
           for (const row of rows) {
-            let nome = "";
-            let email = "";
-            let telefone = "";
-
+            let nome = ""; let email = ""; let telefone = "";
             for (const field of (row.field_data ?? [])) {
               const key = (field.name ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
               const val = field.values?.[0] ?? "";
               if (!val) continue;
-              if (["fullname", "nome", "name", "firstname"].includes(key)) {
-                nome = nome ? `${nome} ${val}` : val;
-              } else if (key === "lastname" && nome) {
-                nome = `${nome} ${val}`;
-              } else if (["email", "emailaddress"].includes(key)) {
-                email = val;
-              } else if (["phonenumber", "phone", "telefone", "celular", "whatsapp"].includes(key)) {
-                telefone = val;
-              }
+              if (["fullname", "nome", "name", "firstname"].includes(key)) nome = nome ? `${nome} ${val}` : val;
+              else if (key === "lastname") nome = nome ? `${nome} ${val}` : val;
+              else if (["email", "emailaddress"].includes(key)) email = val;
+              else if (["phonenumber", "phone", "telefone", "celular", "whatsapp"].includes(key)) telefone = val;
             }
             if (!email) {
               const ef = row.field_data?.find(f => (f.values?.[0] ?? "").includes("@"));
               if (ef) email = ef.values?.[0] ?? "";
             }
             if (!telefone) {
-              const pf = row.field_data?.find(f =>
-                /^[\+\(\)0-9\-\.\s]{9,20}$/.test(f.values?.[0] ?? "")
-              );
+              const pf = row.field_data?.find(f => /^[+() 0-9\-\.]{9,20}$/.test(f.values?.[0] ?? ""));
               if (pf) telefone = pf.values?.[0] ?? "";
             }
-
             leads.push({
               meta_lead_id: row.id,
               nome:         nome || "Lead Meta",
-              email,
-              telefone,
+              email, telefone,
               created_time: row.created_time,
               form_id:      formId,
               form_name:    formName,
             });
           }
-
           const paging = leadsData.paging as { cursors?: { after?: string }; next?: string } | undefined;
           cursor = paging?.cursors?.after ?? null;
           if (!cursor || !paging?.next) break;
@@ -262,7 +253,26 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // 1. Busca as Páginas gerenciadas pelo token
+      // ── Helper: processa uma Página (lista formulários → busca leads) ──────
+      async function processPage(pageId: string, pageName: string): Promise<void> {
+        let forms: { id: string; name: string }[] = [];
+        try {
+          const formsData = await metaFetch(`/${pageId}/leadgen_forms`, {
+            access_token: token,
+            fields: "id,name,status",
+            limit: "100",
+          });
+          forms = (formsData.data ?? []) as { id: string; name: string }[];
+        } catch (err: unknown) {
+          console.error(`[Meta Leads] Erro ao listar formulários da página ${pageId} (${pageName}): ${err instanceof Error ? err.message : String(err)}`);
+          return;
+        }
+        for (const form of forms) {
+          try { await fetchLeadsForForm(form.id, form.name); } catch { /* segue */ }
+        }
+      }
+
+      // ── Estratégia A: /me/accounts (User Token com pages_show_list) ─────────
       let pages: { id: string; name: string }[] = [];
       try {
         const pagesData = await metaFetch("/me/accounts", {
@@ -271,37 +281,52 @@ export async function GET(req: NextRequest) {
           limit: "100",
         });
         pages = (pagesData.data ?? []) as { id: string; name: string }[];
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[Meta Leads] Erro ao listar páginas do token: ${msg}`);
+      } catch {
+        // Token não tem pages_show_list ou é Page Token — tenta próxima estratégia
       }
 
-      // 2. Para cada Página → formulários → leads
-      for (const pg of pages) {
-        let forms: { id: string; name: string }[] = [];
+      if (pages.length > 0) {
+        for (const pg of pages) await processPage(pg.id, pg.name);
+      } else {
+        // ── Estratégia B: extrai page_id via promoted_object das campanhas ───
+        const discoveredPageIds = new Set<string>();
         try {
-          const formsData = await metaFetch(`/${pg.id}/leadgen_forms`, {
+          const campData = await metaFetch(`/${accountId}/campaigns`, {
             access_token: token,
-            fields: "id,name,status",
+            fields: "promoted_object",
             limit: "100",
           });
-          forms = (formsData.data ?? []) as { id: string; name: string }[];
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[Meta Leads] Erro ao buscar formulários da página ${pg.id} (${pg.name}): ${msg}`);
-          continue;
+          for (const camp of (campData.data ?? []) as { promoted_object?: { page_id?: string } }[]) {
+            const pid = camp.promoted_object?.page_id;
+            if (pid) discoveredPageIds.add(pid);
+          }
+        } catch {
+          console.error("[Meta Leads] Estratégia B: falha ao listar campanhas para descobrir page_id.");
         }
 
-        for (const form of forms) {
+        // ── Estratégia C: tenta /me — pode ser um Page Access Token ─────────
+        if (discoveredPageIds.size === 0) {
           try {
-            await fetchLeadsForForm(form.id, form.name);
-          } catch {
-            // formulário sem leads acessíveis — segue
-          }
+            const meData = await metaFetch("/me", { access_token: token, fields: "id,name" });
+            const meId = meData.id as string | undefined;
+            // Page IDs são numéricos longos e não começam com "act_"
+            if (meId && !meId.startsWith("act_")) {
+              discoveredPageIds.add(meId);
+            }
+          } catch { /* ignora */ }
+        }
+
+        for (const pid of discoveredPageIds) {
+          let pageName = pid;
+          try {
+            const pd = await metaFetch(`/${pid}`, { access_token: token, fields: "name" });
+            pageName = (pd.name as string) ?? pid;
+          } catch { /* usa id como nome */ }
+          await processPage(pid, pageName);
         }
       }
 
-      return NextResponse.json({ leads });
+      return NextResponse.json({ leads, pages_found: pages.length });
     }
 
     // ── Buscar árvore completa Campaigns → AdSets → Ads com insights ──────────
