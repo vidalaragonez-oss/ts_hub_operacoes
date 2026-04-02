@@ -255,6 +255,50 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ leads, pages_scanned: accountPageIds.size });
     }
 
+    // ── TEST: mostra dados raw de insights para diagnóstico ───────────────────
+    // GET /api/meta?action=test_insights&account_id=act_xxx&since=2026-03-26&until=2026-04-01
+    if (action === "test_insights") {
+      const accountId = searchParams.get("account_id");
+      const since     = searchParams.get("since");
+      const until     = searchParams.get("until");
+      if (!accountId) return NextResponse.json({ error: "account_id obrigatório" }, { status: 400 });
+
+      const insightParams: Record<string, string> = since && until
+        ? { time_range: JSON.stringify({ since, until }) }
+        : { date_preset: "last_7d" };
+
+      // Busca campanhas
+      const campData = await metaFetch(`/${accountId}/campaigns`, {
+        access_token: token, fields: "id,name,objective,status", limit: "20",
+      });
+
+      const results = [];
+      for (const camp of (campData.data ?? []).slice(0, 5) as { id: string; name: string; objective: string }[]) {
+        let insightRaw = null;
+        try {
+          insightRaw = await metaFetch(`/${camp.id}/insights`, {
+            access_token: token,
+            fields: "spend,actions,cost_per_action_type,date_start,date_stop",
+            ...insightParams,
+          });
+        } catch (e) { insightRaw = { error: String(e) }; }
+
+        results.push({
+          campaign_id: camp.id,
+          campaign_name: camp.name,
+          objective: camp.objective,
+          insight_params_sent: insightParams,
+          insight_raw: insightRaw,
+        });
+      }
+
+      return NextResponse.json({
+        params_received: { since, until, account_id: accountId },
+        insight_params_built: insightParams,
+        campaigns: results,
+      });
+    }
+
     // ── Árvore Radar ───────────────────────────────────────────────────────────
     if (action === "tree") {
       const accountId = searchParams.get("account_id");
