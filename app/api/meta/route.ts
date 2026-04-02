@@ -40,10 +40,11 @@ const OBJECTIVE_LABEL: Record<string, string> = {
 };
 
 // Mapa estrito: objective → action_type que define "resultado"
-// OUTCOME_LEADS usa "onsite_conversion.lead" = "Leads (formulário)" no Meta Ads Manager
-// Não usar "lead" (inclui outros tipos) nem "lead_grouped" (duplica contagem)
+// Para OUTCOME_LEADS, a métrica mais consistente e que bate com o Meta Ads Manager
+// é "offsite_complete_registration_add_meta_leads" — presente em todos os períodos.
+// Fallback: "lead" se o primeiro não existir no payload.
 const OBJECTIVE_ACTION_MAP: Record<string, string[]> = {
-  OUTCOME_LEADS:      ["onsite_conversion.lead"],
+  OUTCOME_LEADS:      ["offsite_complete_registration_add_meta_leads", "lead"],
   OUTCOME_ENGAGEMENT: ["post_engagement"],
   MESSAGES:           ["onsite_conversion.messaging_conversation_started_7d"],
   OUTCOME_TRAFFIC:    ["link_click"],
@@ -55,15 +56,27 @@ function extractInsights(
 ): AdInsights {
   const targetTypes = OBJECTIVE_ACTION_MAP[objective];
   let results = 0;
+
   if (targetTypes) {
-    const s = new Set(targetTypes);
-    for (const a of actions) if (s.has(a.action_type)) results += parseInt(a.value ?? "0", 10);
+    // Prioridade: usa o PRIMEIRO tipo que tiver valor > 0 no payload
+    // Isso evita somar tipos que representam o mesmo evento
+    for (const targetType of targetTypes) {
+      const found = actions.find(a => a.action_type === targetType);
+      if (found) {
+        results = parseInt(found.value ?? "0", 10);
+        break; // para no primeiro que encontrar
+      }
+    }
   }
+
   let cpr = 0;
   if (targetTypes) {
-    const s = new Set(targetTypes);
-    for (const c of cpaList) {
-      if (s.has(c.action_type)) { const v = parseFloat(c.value ?? "0"); if (v > 0 && (cpr === 0 || v < cpr)) cpr = v; }
+    for (const targetType of targetTypes) {
+      const found = cpaList.find(c => c.action_type === targetType);
+      if (found) {
+        cpr = parseFloat(found.value ?? "0");
+        if (cpr > 0) break;
+      }
     }
   }
   if (cpr === 0 && results > 0) cpr = spend / results;
