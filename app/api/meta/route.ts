@@ -39,12 +39,11 @@ const OBJECTIVE_LABEL: Record<string, string> = {
   MESSAGES: "Mensagens", UNKNOWN: "—",
 };
 
-// Mapa estrito: objective → action_type que define "resultado"
-// Para OUTCOME_LEADS, a métrica mais consistente e que bate com o Meta Ads Manager
-// é "offsite_complete_registration_add_meta_leads" — presente em todos os períodos.
-// Fallback: "lead" se o primeiro não existir no payload.
+// Mapa estrito: objective → action_types em ordem de prioridade
+// extractInsights usa o PRIMEIRO que encontrar no payload (não soma)
+// "lead" = "Leads (formulário)" no Meta Ads Manager — campo exato da coluna Resultados
 const OBJECTIVE_ACTION_MAP: Record<string, string[]> = {
-  OUTCOME_LEADS:      ["offsite_complete_registration_add_meta_leads", "lead"],
+  OUTCOME_LEADS:      ["lead"],
   OUTCOME_ENGAGEMENT: ["post_engagement"],
   MESSAGES:           ["onsite_conversion.messaging_conversation_started_7d"],
   OUTCOME_TRAFFIC:    ["link_click"],
