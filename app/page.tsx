@@ -2536,10 +2536,9 @@ function RadarWrapper({
 
   const symbol = (moedaCliente ?? (treeData?.currency ?? "BRL")) === "USD" ? "US$" : "R$";
 
-  // Dispara fetch apenas ao montar ou trocar de cliente (não ao mudar preset — o clique já faz isso)
+  // Dispara fetch apenas ao montar ou trocar de cliente
   useEffect(() => {
-    const { since, until } = computeRadarDates("7d");
-    onFetch(clienteId, accountId, token, since, until);
+    doFetch("7d");
     setPreset("7d");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteId]);
@@ -2547,16 +2546,29 @@ function RadarWrapper({
   const handlePresetClick = (p: RadarPreset) => {
     setPreset(p);
     setShowCustom(p === "custom");
-    if (p === "custom") return; // custom espera o usuário preencher as datas
-    const { since, until } = computeRadarDates(p);
-    onFetch(clienteId, accountId, token, since, until);
+    if (p === "custom") return;
+    doFetch(p);
   };
   const handleCustomApply = () => {
     if (!customFrom || !customTo) return;
-    onFetch(clienteId, accountId, token, customFrom, customTo);
+    doFetch("custom", customFrom, customTo);
   };
 
+  const [activeDates, setActiveDates] = useState<{ since: string; until: string }>(() => computeRadarDates("7d"));
+
   const isLoading = !treeData || treeData.loading;
+
+  // Função centralizada que busca e registra as datas ativas
+  const doFetch = (p: RadarPreset, from?: string, to?: string) => {
+    if (p === "custom" && from && to) {
+      setActiveDates({ since: from, until: to });
+      onFetch(clienteId, accountId, token, from, to);
+    } else if (p !== "custom") {
+      const dates = computeRadarDates(p);
+      setActiveDates(dates);
+      onFetch(clienteId, accountId, token, dates.since, dates.until);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-blue-500/20 bg-[#111827]/60 p-4 space-y-3">
@@ -2574,7 +2586,7 @@ function RadarWrapper({
         </div>
         <div className="flex items-center gap-1 flex-wrap">
           {(["today","yesterday","7d","30d","custom"] as RadarPreset[]).map(p => (
-            <button key={p} onClick={() => handlePresetClick(p)}
+            <button key={p} onClick={() => { setPreset(p); setShowCustom(p === "custom"); doFetch(p); }}
               className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${
                 preset === p
                   ? "bg-blue-500 border-blue-400 text-white"
@@ -2585,6 +2597,13 @@ function RadarWrapper({
           ))}
         </div>
       </div>
+
+      {/* Período ativo — para confirmar visualmente as datas */}
+      {!isLoading && preset !== "custom" && (
+        <p className="text-[9px] text-[#4a4844] font-mono">
+          {activeDates.since.split("-").reverse().join("/")} → {activeDates.until.split("-").reverse().join("/")}
+        </p>
+      )}
 
       {/* Campos de data personalizada */}
       {showCustom && (
@@ -3202,10 +3221,17 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ action: "tree", account_id: accountId });
       if (token) params.set("token", token);
-      if (since && until) { params.set("since", since); params.set("until", until); } else {
-        const today = new Date(); const from = new Date(today); from.setDate(today.getDate() - 6);
-        const fmt = (d: Date) => d.toISOString().slice(0, 10);
-        params.set("since", fmt(from)); params.set("until", fmt(today));
+      // Sempre usa datas explícitas — nunca deixa o route usar date_preset sozinho
+      const fmt = (d: Date) => d.toISOString().slice(0, 10);
+      if (since && until) {
+        params.set("since", since);
+        params.set("until", until);
+      } else {
+        // Fallback: últimos 7 dias até ontem (igual ao Meta Ads Manager)
+        const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+        const from = new Date(yesterday); from.setDate(yesterday.getDate() - 6);
+        params.set("since", fmt(from));
+        params.set("until", fmt(yesterday));
       }
       const res  = await fetch(`/api/meta?${params}`);
       const json = await res.json();
