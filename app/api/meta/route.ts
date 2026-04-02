@@ -262,64 +262,93 @@ export async function GET(req: NextRequest) {
       const accountData = await metaFetch(`/${accountId}`, {
         access_token: token, fields: "account_status,name,currency",
       });
-      const timeParam: Record<string, string> = since && until
+
+      // IMPORTANTE: A Meta API ignora time_range/date_preset em insights inline (insights{...}).
+      // O filtro de período deve ser passado como parâmetro separado na query de insights.
+      // Por isso buscamos campanhas sem filtro de período, e depois buscamos insights
+      // separadamente usando /{id}/insights com o parâmetro correto.
+      const insightParams: Record<string, string> = since && until
         ? { time_range: JSON.stringify({ since, until }) }
         : { date_preset: "last_7d" };
-      const iFields = "spend,actions,cost_per_action_type";
+
+      // Helper: busca insights de um nó (campanha, adset, ad) com período correto
+      async function fetchNodeInsights(nodeId: string): Promise<{ actions: ActionEntry[]; cpaList: ActionEntry[]; spend: number }> {
+        try {
+          const iData = await metaFetch(`/${nodeId}/insights`, {
+            access_token: token,
+            fields: "spend,actions,cost_per_action_type",
+            ...insightParams,
+          });
+          const row = (iData.data ?? [])[0] as Record<string, unknown> | undefined ?? {};
+          return {
+            spend:   parseFloat((row.spend as string) ?? "0") || 0,
+            actions: (row.actions as ActionEntry[]) ?? [],
+            cpaList: (row.cost_per_action_type as ActionEntry[]) ?? [],
+          };
+        } catch {
+          return { spend: 0, actions: [], cpaList: [] };
+        }
+      }
 
       const campaignData = await metaFetch(`/${accountId}/campaigns`, {
         access_token: token,
-        fields: `id,name,objective,status,insights{${iFields}}`,
-        limit: "100", ...timeParam,
+        fields: "id,name,objective,status",
+        limit: "100",
       });
 
       const campaignNodes: CampaignNode[] = [];
       for (const camp of (campaignData.data ?? []) as Record<string, unknown>[]) {
-        const campId   = camp.id as string;
+        const campId    = camp.id as string;
         const objective = (camp.objective as string) ?? "UNKNOWN";
-        const campRow  = ((camp.insights as { data?: Record<string, unknown>[] })?.data ?? [])[0] ?? {};
-        const campInsights = extractInsights(
-          (campRow.actions as ActionEntry[]) ?? [], (campRow.cost_per_action_type as ActionEntry[]) ?? [],
-          parseFloat((campRow.spend as string) ?? "0") || 0, objective,
-        );
+
+        // Busca insights da campanha com período correto (endpoint separado)
+        const campIns = await fetchNodeInsights(campId);
+        const campInsights = extractInsights(campIns.actions, campIns.cpaList, campIns.spend, objective);
+
         let adsetNodes: AdSetNode[] = [];
         try {
           const adsetData = await metaFetch(`/${campId}/adsets`, {
-            access_token: token, fields: `id,name,status,insights{${iFields}}`, limit: "100", ...timeParam,
+            access_token: token, fields: "id,name,status", limit: "100",
           });
           for (const adset of (adsetData.data ?? []) as Record<string, unknown>[]) {
-            const adsetRow = ((adset.insights as { data?: Record<string, unknown>[] })?.data ?? [])[0] ?? {};
-            const adsetInsights = extractInsights(
-              (adsetRow.actions as ActionEntry[]) ?? [], (adsetRow.cost_per_action_type as ActionEntry[]) ?? [],
-              parseFloat((adsetRow.spend as string) ?? "0") || 0, objective,
-            );
+            const adsetId = adset.id as string;
+
+            // Busca insights do adset com período correto
+            const adsetIns = await fetchNodeInsights(adsetId);
+            const adsetInsights = extractInsights(adsetIns.actions, adsetIns.cpaList, adsetIns.spend, objective);
+
             let adNodes: AdNode[] = [];
             try {
-              const adsData = await metaFetch(`/${adset.id as string}/ads`, {
-                access_token: token, fields: `id,name,status,insights{${iFields}}`, limit: "100", ...timeParam,
+              const adsData = await metaFetch(`/${adsetId}/ads`, {
+                access_token: token, fields: "id,name,status", limit: "100",
               });
-              adNodes = ((adsData.data ?? []) as Record<string, unknown>[]).map(ad => {
-                const adRow = ((ad.insights as { data?: Record<string, unknown>[] })?.data ?? [])[0] ?? {};
-                return {
-                  id: ad.id as string, name: (ad.name as string) ?? "Anúncio",
-                  status: (ad.status as string) ?? "UNKNOWN",
-                  insights: extractInsights(
-                    (adRow.actions as ActionEntry[]) ?? [], (adRow.cost_per_action_type as ActionEntry[]) ?? [],
-                    parseFloat((adRow.spend as string) ?? "0") || 0, objective,
-                  ),
-                };
-              });
+              // Busca insights de todos os ads em paralelo
+              adNodes = await Promise.all(
+                ((adsData.data ?? []) as Record<string, unknown>[]).map(async ad => {
+                  const adId = ad.id as string;
+                  const adIns = await fetchNodeInsights(adId);
+                  return {
+                    id: adId, name: (ad.name as string) ?? "Anúncio",
+                    status: (ad.status as string) ?? "UNKNOWN",
+                    insights: extractInsights(adIns.actions, adIns.cpaList, adIns.spend, objective),
+                  };
+                })
+              );
             } catch { /* sem ads */ }
+
             adsetNodes.push({
-              id: adset.id as string, name: (adset.name as string) ?? "Conjunto",
-              status: (adset.status as string) ?? "UNKNOWN", insights: adsetInsights, ads: adNodes,
+              id: adsetId, name: (adset.name as string) ?? "Conjunto",
+              status: (adset.status as string) ?? "UNKNOWN",
+              insights: adsetInsights, ads: adNodes,
             });
           }
         } catch { /* sem adsets */ }
+
         campaignNodes.push({
           id: campId, name: (camp.name as string) ?? "Campanha",
           objective, objective_label: OBJECTIVE_LABEL[objective] ?? objective,
-          status: (camp.status as string) ?? "UNKNOWN", insights: campInsights, adsets: adsetNodes,
+          status: (camp.status as string) ?? "UNKNOWN",
+          insights: campInsights, adsets: adsetNodes,
         });
       }
 
