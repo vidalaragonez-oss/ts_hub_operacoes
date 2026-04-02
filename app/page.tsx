@@ -2251,19 +2251,23 @@ type RadarPreset = "today" | "yesterday" | "7d" | "30d" | "custom";
 function computeRadarDates(preset: RadarPreset): { since: string; until: string } {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   const today = new Date();
+  // yesterday: dados de hoje são parciais — o Meta Ads Manager também usa D-1 como limite
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
   if (preset === "today") {
     const s = fmt(today); return { since: s, until: s };
   }
   if (preset === "yesterday") {
-    const y = new Date(today); y.setDate(today.getDate() - 1); const s = fmt(y); return { since: s, until: s };
+    const s = fmt(yesterday); return { since: s, until: s };
   }
   if (preset === "7d") {
-    const from = new Date(today); from.setDate(today.getDate() - 6); return { since: fmt(from), until: fmt(today) };
+    const from = new Date(yesterday); from.setDate(yesterday.getDate() - 6);
+    return { since: fmt(from), until: fmt(yesterday) };
   }
   if (preset === "30d") {
-    const from = new Date(today); from.setDate(today.getDate() - 29); return { since: fmt(from), until: fmt(today) };
+    const from = new Date(yesterday); from.setDate(yesterday.getDate() - 29);
+    return { since: fmt(from), until: fmt(yesterday) };
   }
-  return { since: fmt(today), until: fmt(today) };
+  return { since: fmt(yesterday), until: fmt(yesterday) };
 }
 
 const RADAR_PRESET_LABELS: Record<RadarPreset, string> = {
@@ -3262,7 +3266,7 @@ export default function Home() {
       const json = await res.json();
       if (json.error || !json.leads?.length) return;
 
-      // Busca meta_lead_ids já existentes para este cliente
+      // Busca TODOS os meta_lead_ids já existentes para este cliente
       const { data: existing } = await supabase
         .from("leads")
         .select("meta_lead_id")
@@ -3271,10 +3275,19 @@ export default function Home() {
 
       const existingIds = new Set((existing ?? []).map((r: { meta_lead_id: string }) => r.meta_lead_id));
 
+      // Deduplicação dupla:
+      // 1. Remove os que já existem no banco
+      // 2. Remove duplicatas dentro do próprio array retornado pela API
+      const seenInBatch = new Set<string>();
       const novos = (json.leads as {
         meta_lead_id: string; nome: string; email: string;
         telefone: string; created_time: string;
-      }[]).filter(l => !existingIds.has(l.meta_lead_id));
+      }[]).filter(l => {
+        if (existingIds.has(l.meta_lead_id)) return false;
+        if (seenInBatch.has(l.meta_lead_id)) return false;
+        seenInBatch.add(l.meta_lead_id);
+        return true;
+      });
 
       if (!novos.length) return;
 
@@ -3290,11 +3303,7 @@ export default function Home() {
         operacao_id:  operacaoId,
       }));
 
-      // upsert: se meta_lead_id já existir (race condition), não duplica
-      const { data: inserted, error } = await supabase
-        .from("leads")
-        .upsert(rows, { onConflict: "meta_lead_id", ignoreDuplicates: true })
-        .select();
+      const { data: inserted, error } = await supabase.from("leads").insert(rows).select();
       if (error) throw error;
       if (inserted?.length) {
         setAllLeadsForDashboard(prev => [...((inserted as Lead[]) ?? []), ...prev]);
