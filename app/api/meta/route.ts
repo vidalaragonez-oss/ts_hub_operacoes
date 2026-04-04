@@ -498,38 +498,57 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // ── DEBUG ──────────────────────────────────────────────────────────────────
+    // ── DEBUG: despeja todos os action_types brutos da API ────────────────────
+    // Uso: /api/meta?action=debug&account_id=ACT_xxx&since=2026-03-28&until=2026-04-03
+    // Descobre EXATAMENTE qual action_type a Meta usa para "Conversas" nesta conta
     if (action === "debug") {
       const accountId = searchParams.get("account_id") ?? "";
-      const report: Record<string, unknown> = {};
-      try { report.me = await metaFetch("/me", { access_token: token, fields: "id,name" }); } catch (e) { report.me_error = String(e); }
-      try { report.permissions = (await metaFetch("/me/permissions", { access_token: token })).data ?? []; } catch (e) { report.permissions_error = String(e); }
+      const since     = searchParams.get("since");
+      const until     = searchParams.get("until");
+      if (!accountId) return NextResponse.json({ error: "account_id obrigatorio" }, { status: 400 });
 
-      if (accountId) {
-        const pageIds = await discoverPageIds(accountId, token);
-        report.discovered_page_ids = [...pageIds];
-        report.discovery_strategies_tried = 4;
+      const report: Record<string, unknown> = {
+        account_id: accountId,
+        period: since && until ? `${since} -> ${until}` : "last_7d",
+        note: "Compara action_types em diferentes janelas de atribuicao para achar o valor correto",
+      };
 
-        if (pageIds.size > 0) {
-          const pageTokenMap = new Map<string, string>();
-          try {
-            const pd = await metaFetch("/me/accounts", { access_token: token, fields: "id,name,access_token", limit: "200" });
-            for (const pg of (pd.data ?? []) as { id: string; name: string; access_token?: string }[]) {
-              if (pg.access_token) pageTokenMap.set(pg.id, pg.access_token);
-            }
-          } catch (e) { report.page_tokens_error = String(e); }
+      const windowCombos = [
+        { label: "1d_view+7d_click (padrao Gerenciador)", windows: '["1d_view","7d_click"]' },
+        { label: "7d_click only",                          windows: '["7d_click"]' },
+        { label: "1d_click only",                          windows: '["1d_click"]' },
+        { label: "sem janela (API default)",               windows: "" },
+      ];
 
-          const formsReport = [];
-          for (const pid of pageIds) {
-            const pt = pageTokenMap.get(pid) ?? token;
-            try {
-              const fd = await metaFetch(`/${pid}/leadgen_forms`, { access_token: pt, fields: "id,name,status", limit: "10" });
-              formsReport.push({ page_id: pid, forms_count: (fd.data ?? []).length, forms: fd.data ?? [], has_page_token: pageTokenMap.has(pid) });
-            } catch (e) { formsReport.push({ page_id: pid, error: String(e), has_page_token: pageTokenMap.has(pid) }); }
-          }
-          report.leadgen_forms_by_page = formsReport;
+      const windowResults = [];
+      for (const combo of windowCombos) {
+        try {
+          const p: Record<string, string> = {
+            access_token: token,
+            fields: "campaign_id,campaign_name,objective,spend,actions",
+            level: "campaign",
+            limit: "10",
+          };
+          if (since && until) p.time_range = JSON.stringify({ since, until });
+          else p.date_preset = "last_7d";
+          if (combo.windows) p.action_attribution_windows = combo.windows;
+
+          const data = await metaFetch(`/${accountId}/insights`, p);
+          const campaigns = ((data.data ?? []) as Record<string, unknown>[]).map(row => ({
+            campaign_name: row.campaign_name,
+            objective:     row.objective ?? "unknown",
+            spend:         row.spend,
+            all_actions: ((row.actions as ActionEntry[]) ?? []).map(a => ({
+              type: a.action_type,
+              value: a.value,
+            })),
+          }));
+          windowResults.push({ window: combo.label, campaigns });
+        } catch (e) {
+          windowResults.push({ window: combo.label, error: String(e) });
         }
       }
+      report.results_by_window = windowResults;
       return NextResponse.json(report);
     }
 
