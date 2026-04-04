@@ -43,6 +43,8 @@ import {
   Bell,
   CreditCard,
   AlertTriangle,
+  Shield,
+  History,
 } from "lucide-react";
 import {
   NovaOperacaoModal,
@@ -51,6 +53,8 @@ import {
   NewLeadDialog,
   ReportBugModal,
   AdminBugsModal,
+  AuditLogsModal,
+  registrarLog,
   type Cliente,
   type ClienteStatus,
   type Operacao,
@@ -1889,10 +1893,11 @@ const EDIT_STATUS_OPTIONS: { value: ClienteStatus; label: string }[] = [
 ];
 
 function EditClienteModal({
-  cliente, gestoresEstrat, gestoresTrafego, onSaved, onClose,
+  cliente, gestoresEstrat, gestoresTrafego, onSaved, onClose, perfil,
 }: {
   cliente: Cliente; gestoresEstrat: string[]; gestoresTrafego: string[];
   onSaved: (c: Cliente) => void; onClose: () => void;
+  perfil?: { user_id: string; nome: string } | null;
 }) {
   const [nome,        setNome]       = useState(cliente.nome);
   const [gestor,      setGestor]     = useState(cliente.gestor);
@@ -1997,6 +2002,16 @@ function EditClienteModal({
 
       const saved = normalizeCliente(data);
       toast.success(`${nome} atualizado com sucesso!`);
+      if (perfil) {
+        await registrarLog(
+          perfil.user_id,
+          perfil.nome,
+          "EDITAR_CLIENTE",
+          "clientes",
+          cliente.id,
+          `Gestor alterou configurações do cliente "${nome.trim()}"`
+        );
+      }
       onSaved(saved);
       onClose();
     } catch (err: unknown) {
@@ -2818,6 +2833,7 @@ export default function Home() {
   // ── Bug Reports ───────────────────────────────────────────────────────────────
   const [isBugModalOpen, setIsBugModalOpen]   = useState(false);
   const [isAdminBugsOpen, setIsAdminBugsOpen] = useState(false);
+  const [isAuditOpen, setIsAuditOpen]         = useState(false);
 
   useEffect(() => {
     // Escuta erros globais para sabermos exatamente o que quebrou em produção
@@ -3079,10 +3095,20 @@ export default function Home() {
       if (error) throw error;
       toast.success(`${ids.length} lead(s) excluído(s).`);
       setAllLeadsForDashboard(prev => prev.filter(l=>!ids.includes(l.id)));
+      if (perfil) {
+        await registrarLog(
+          perfil.user_id,
+          perfil.nome,
+          "EXCLUIR_LEADS",
+          "leads",
+          clienteAtivo?.id ?? null,
+          `Gestor excluiu ${ids.length} lead(s) do cliente "${clienteAtivo?.nome ?? "desconhecido"}"`
+        );
+      }
     } catch (err: unknown) {
       toast.error(`Erro ao excluir leads: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
     }
-  }, []);
+  }, [perfil, clienteAtivo]);
 
   const handleSaveNewLead = useCallback(async (leadData: Omit<Lead,"id">) => {
     if (!clienteAtivo||!operacaoAtiva) return;
@@ -3129,6 +3155,16 @@ export default function Home() {
       const normalized = normalizeCliente(data as Record<string, unknown>);
       setClientes(prev=>prev.map(x=>x.id===id?normalized:x));
       toast.success(newStatus==="ATIVO"?`${c.nome} reativado.`:`${c.nome} desativado.`);
+      if (perfil) {
+        await registrarLog(
+          perfil.user_id,
+          perfil.nome,
+          "MUDAR_STATUS",
+          "clientes",
+          id,
+          `Gestor alterou status do cliente "${c.nome}" para ${newStatus}`
+        );
+      }
     } catch (err: unknown) {
       toast.error(`Erro: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
     }
@@ -3143,6 +3179,16 @@ export default function Home() {
       setClientes(prev=>prev.filter(x=>x.id!==id));
       if (clienteAtivo?.id===id) { setClienteAtivo(null); }
       toast.success("Cliente removido.");
+      if (perfil) {
+        await registrarLog(
+          perfil.user_id,
+          perfil.nome,
+          "EXCLUIR_CLIENTE",
+          "clientes",
+          id,
+          `Gestor excluiu permanentemente o cliente "${c?.nome ?? id}"`
+        );
+      }
     } catch (err: unknown) {
       toast.error(`Erro: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
     }
@@ -3658,6 +3704,18 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+
+            {/* ── Botão: Auditoria (somente admin) ── */}
+            {perfil?.role === "admin" && (
+              <button
+                onClick={() => setIsAuditOpen(true)}
+                title="Painel de Auditoria"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-violet-400 hover:border-violet-500/40 transition-colors"
+              >
+                <Shield size={14} />
+                <span className="hidden md:inline">Auditoria</span>
+              </button>
+            )}
 
             {/* ── Botão: Notificações de Bugs (somente admin) ── */}
             {perfil?.role === "admin" && (
@@ -4332,6 +4390,7 @@ export default function Home() {
           gestoresEstrat={gestoresEstrat} gestoresTrafego={gestoresTrafego}
           onSaved={handleClienteSaved} onClose={()=>setClienteModal(null)}
           initialTab={clienteModal.initialTab}
+          perfil={perfil}
         />
       )}
       {editModal && (
@@ -4342,6 +4401,7 @@ export default function Home() {
           gestoresTrafego={gestoresTrafego}
           onSaved={handleEditClienteSaved}
           onClose={()=>setEditModal(null)}
+          perfil={perfil}
         />
       )}
       <NewLeadDialog open={newLeadOpen} onClose={()=>setNewLeadOpen(false)} onSave={handleSaveNewLead}/>
@@ -4361,6 +4421,14 @@ export default function Home() {
         <AdminBugsModal
           open={isAdminBugsOpen}
           onClose={() => setIsAdminBugsOpen(false)}
+        />
+      )}
+
+      {/* ── Modal: Admin — Audit Trail (somente admin) ── */}
+      {perfil?.role === "admin" && (
+        <AuditLogsModal
+          open={isAuditOpen}
+          onClose={() => setIsAuditOpen(false)}
         />
       )}
 
