@@ -29,9 +29,39 @@ import {
   Search,
   AlertTriangle,
   Info,
+  Shield,
+  History,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UTILIDADE: LOG DE AUDITORIA
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function registrarLog(
+  userId: string,
+  userNome: string,
+  acao: string,
+  entidade: string,
+  entidadeId: string | null,
+  detalhes: string
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("audit_logs").insert({
+      user_id:    userId,
+      user_nome:  userNome,
+      acao,
+      entidade,
+      entidade_id: entidadeId,
+      detalhes,
+    });
+    if (error) console.error("[AuditLog] Erro ao registrar log:", error);
+  } catch (err) {
+    console.error("[AuditLog] Exceção ao registrar log:", err);
+  }
+}
 
 // ─── Tipos locais ─────────────────────────────────────────────────────────────
 
@@ -474,6 +504,7 @@ export interface ClienteModalProps {
   onSaved: (cliente: Cliente) => void;
   onClose: () => void;
   initialTab?: "perfil" | "campanhas" | "financeiro" | "integracoes";
+  perfil?: { user_id: string; nome: string } | null;
 }
 
 export function ClienteModal({
@@ -482,6 +513,7 @@ export function ClienteModal({
   gestoresTrafego: gestoresTrafegoProp,
   onSaved, onClose,
   initialTab,
+  perfil,
 }: ClienteModalProps) {
 
 
@@ -653,6 +685,18 @@ export function ClienteModal({
         id: mode === "new" ? (result.data as Cliente).id : initial!.id,
       } as unknown as Cliente;
       toast.success(mode === "new" ? `${payload.nome} cadastrado!` : "Alterações salvas!");
+      if (perfil) {
+        await registrarLog(
+          perfil.user_id,
+          perfil.nome,
+          mode === "new" ? "CRIAR_CLIENTE" : "EDITAR_CLIENTE",
+          "clientes",
+          saved.id,
+          mode === "new"
+            ? `Gestor criou o cliente "${payload.nome}"`
+            : `Gestor alterou configurações do cliente "${payload.nome}"`
+        );
+      }
       onSaved(saved);
       onClose();
     } catch (err: unknown) {
@@ -2112,5 +2156,212 @@ function BugCard({
         </div>
       )}
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODAL: PAINEL DE AUDITORIA (somente admin)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface AuditLog {
+  id: string;
+  user_id: string;
+  user_nome: string;
+  acao: string;
+  entidade: string;
+  entidade_id: string | null;
+  detalhes: string;
+  created_at: string;
+}
+
+const ACAO_STYLE: Record<string, { badge: string; dot: string }> = {
+  CRIAR_CLIENTE:   { badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",  dot: "bg-emerald-500"  },
+  EDITAR_CLIENTE:  { badge: "bg-blue-500/15 text-blue-400 border-blue-500/30",           dot: "bg-blue-500"     },
+  EXCLUIR_CLIENTE: { badge: "bg-red-500/15 text-red-400 border-red-500/30",              dot: "bg-red-500"      },
+  MUDAR_STATUS:    { badge: "bg-amber-500/15 text-amber-400 border-amber-500/30",        dot: "bg-amber-500"    },
+  EXCLUIR_LEADS:   { badge: "bg-red-500/15 text-red-400 border-red-500/30",              dot: "bg-red-400"      },
+  DEFAULT:         { badge: "bg-[#2e2c29] text-[#7a7268] border-[#3a3835]",             dot: "bg-[#7a7268]"    },
+};
+
+function getAcaoStyle(acao: string) {
+  return ACAO_STYLE[acao] ?? ACAO_STYLE.DEFAULT;
+}
+
+export function AuditLogsModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [logs, setLogs]       = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchLogs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("audit_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      setLogs((data as AuditLog[]) ?? []);
+    } catch (err: unknown) {
+      toast.error(`Erro ao carregar logs: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) fetchLogs();
+  }, [open, fetchLogs]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative w-full max-w-3xl bg-[#1a1917] border border-[#2e2c29] rounded-2xl shadow-2xl shadow-black/70 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-300 flex flex-col max-h-[88vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2e2c29] shrink-0 bg-[#111010]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
+              <Shield size={15} className="text-violet-400" />
+            </div>
+            <div>
+              <p className="text-[0.6rem] font-bold uppercase tracking-[0.18em] text-violet-400 mb-0.5">Governança</p>
+              <h2 className="text-sm font-bold text-[#e8e2d8] flex items-center gap-2">
+                <History size={13} className="text-[#7a7268]" /> Audit Trail — Últimas 100 ações
+              </h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchLogs}
+              disabled={loading}
+              title="Recarregar logs"
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] hover:text-violet-400 hover:border-violet-500/40 transition-colors disabled:opacity-40"
+            >
+              {loading
+                ? <Loader2 size={14} className="animate-spin" />
+                : <RotateCcw size={14} />}
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8] transition-colors"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        {/* Contagem */}
+        {!loading && (
+          <div className="px-5 py-2.5 border-b border-[#2e2c29] bg-[#161514] shrink-0 flex items-center gap-2">
+            <Activity size={11} className="text-violet-400" />
+            <span className="text-[10px] font-semibold text-[#7a7268]">
+              {logs.length} registro{logs.length !== 1 ? "s" : ""} encontrado{logs.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <div className="w-8 h-8 rounded-full border-2 border-violet-500/20 border-t-violet-500 animate-spin" />
+              <p className="text-[#7a7268] text-sm">Buscando registros...</p>
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <Shield size={36} className="text-[#2e2c29]" />
+              <p className="text-[#7a7268] text-sm">Nenhuma ação registrada ainda.</p>
+            </div>
+          ) : (
+            <>
+              {/* Cabeçalho da tabela — só em desktop */}
+              <div className="hidden sm:grid grid-cols-[140px_120px_130px_1fr] gap-3 px-5 py-2 border-b border-[#2e2c29] bg-[#111010] shrink-0">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Data / Hora</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Usuário</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Ação</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Detalhes</span>
+              </div>
+
+              <div className="divide-y divide-[#1e1c1a]">
+                {logs.map((log) => {
+                  const style = getAcaoStyle(log.acao);
+                  const dt = new Date(log.created_at);
+                  const dataHora = dt.toLocaleString("pt-BR", {
+                    day:    "2-digit",
+                    month:  "2-digit",
+                    year:   "numeric",
+                    hour:   "2-digit",
+                    minute: "2-digit",
+                  });
+
+                  return (
+                    <div
+                      key={log.id}
+                      className="px-5 py-3 hover:bg-[#1e1c1a]/60 transition-colors"
+                    >
+                      {/* Desktop: grid de 4 colunas */}
+                      <div className="hidden sm:grid grid-cols-[140px_120px_130px_1fr] gap-3 items-start">
+                        {/* Data/Hora */}
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-0.5 ${style.dot}`} />
+                          <span className="text-[10px] text-[#7a7268] font-mono">{dataHora}</span>
+                        </div>
+
+                        {/* Usuário */}
+                        <span className="text-xs font-semibold text-[#c8c0b4] truncate">{log.user_nome}</span>
+
+                        {/* Ação */}
+                        <span className={`inline-flex items-center self-start px-2 py-0.5 rounded-lg text-[9px] font-bold border tracking-wide ${style.badge}`}>
+                          {log.acao.replace(/_/g, " ")}
+                        </span>
+
+                        {/* Detalhes */}
+                        <span className="text-xs text-[#7a7268] leading-relaxed">{log.detalhes}</span>
+                      </div>
+
+                      {/* Mobile: card compacto */}
+                      <div className="sm:hidden space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[9px] font-bold border tracking-wide ${style.badge}`}>
+                            {log.acao.replace(/_/g, " ")}
+                          </span>
+                          <span className="text-[10px] text-[#4a4844] font-mono">{dataHora}</span>
+                        </div>
+                        <p className="text-xs font-semibold text-[#c8c0b4]">{log.user_nome}</p>
+                        <p className="text-xs text-[#7a7268] leading-relaxed">{log.detalhes}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="shrink-0 px-5 py-3.5 border-t border-[#2e2c29] bg-[#111010] flex items-center justify-between">
+          <p className="text-[10px] text-[#4a4844]">
+            Registros ordenados do mais recente para o mais antigo.
+          </p>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-[#e8e2d8] transition-colors"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
