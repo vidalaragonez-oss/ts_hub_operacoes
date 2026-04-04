@@ -279,21 +279,42 @@ export async function GET(req: NextRequest) {
 
       const results = [];
       for (const camp of (campData.data ?? []).slice(0, 5) as { id: string; name: string; objective: string }[]) {
-        let insightRaw = null;
+        let rawDefault = null;
+        let raw7dClick = null;
         try {
-          insightRaw = await metaFetch(`/${camp.id}/insights`, {
+          rawDefault = await metaFetch(`/${camp.id}/insights`, {
             access_token: token,
             fields: "spend,actions,cost_per_action_type,date_start,date_stop",
             ...insightParams,
           });
-        } catch (e) { insightRaw = { error: String(e) }; }
+        } catch (e) { rawDefault = { error: String(e) }; }
+        try {
+          raw7dClick = await metaFetch(`/${camp.id}/insights`, {
+            access_token: token,
+            fields: "spend,actions,cost_per_action_type,date_start,date_stop",
+            action_attribution_windows: '["7d_click"]',
+            ...insightParams,
+          });
+        } catch (e) { raw7dClick = { error: String(e) }; }
+
+        // Extrai só os leads de cada janela para facilitar comparação
+        const getLeadVal = (data: Record<string, unknown>, type: string) => {
+          const row = ((data as { data?: Record<string, unknown>[] })?.data ?? [])[0] as Record<string, unknown> | undefined;
+          const actions = (row?.actions ?? []) as { action_type: string; value: string }[];
+          return actions.find(a => a.action_type === type)?.value ?? "não encontrado";
+        };
 
         results.push({
-          campaign_id: camp.id,
           campaign_name: camp.name,
           objective: camp.objective,
-          insight_params_sent: insightParams,
-          insight_raw: insightRaw,
+          comparison: {
+            "onsite_conversion.lead_grouped — janela padrão": getLeadVal(rawDefault as Record<string, unknown>, "onsite_conversion.lead_grouped"),
+            "onsite_conversion.lead_grouped — 7d_click":     getLeadVal(raw7dClick as Record<string, unknown>, "onsite_conversion.lead_grouped"),
+            "lead — janela padrão":                          getLeadVal(rawDefault as Record<string, unknown>, "lead"),
+            "lead — 7d_click":                               getLeadVal(raw7dClick as Record<string, unknown>, "lead"),
+            "onsite_conversion.lead — janela padrão":        getLeadVal(rawDefault as Record<string, unknown>, "onsite_conversion.lead"),
+            "onsite_conversion.lead — 7d_click":             getLeadVal(raw7dClick as Record<string, unknown>, "onsite_conversion.lead"),
+          },
         });
       }
 
