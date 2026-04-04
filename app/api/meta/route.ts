@@ -39,11 +39,11 @@ const OBJECTIVE_LABEL: Record<string, string> = {
   MESSAGES: "Mensagens", UNKNOWN: "—",
 };
 
-// Mapa estrito: objective → action_types em ordem de prioridade
-// extractInsights usa o PRIMEIRO que encontrar no payload (não soma)
-// "lead" = "Leads (formulário)" no Meta Ads Manager — campo exato da coluna Resultados
+// Mapa: objective → action_types em ordem de prioridade (OR, não soma)
+// Copiado exatamente do projeto de referência que funciona:
+// getLeads = getAction("lead") || getAction("lead_grouped") || getAction("leadgen_grouped")
 const OBJECTIVE_ACTION_MAP: Record<string, string[]> = {
-  OUTCOME_LEADS:      ["lead"],
+  OUTCOME_LEADS:      ["lead", "onsite_conversion.lead_grouped", "leadgen_grouped"],
   OUTCOME_ENGAGEMENT: ["post_engagement"],
   MESSAGES:           ["onsite_conversion.messaging_conversation_started_7d"],
   OUTCOME_TRAFFIC:    ["link_click"],
@@ -57,13 +57,12 @@ function extractInsights(
   let results = 0;
 
   if (targetTypes) {
-    // Prioridade: usa o PRIMEIRO tipo que tiver valor > 0 no payload
-    // Isso evita somar tipos que representam o mesmo evento
+    // OR logic: usa o PRIMEIRO tipo que tiver valor > 0 (igual ao projeto de referência)
     for (const targetType of targetTypes) {
       const found = actions.find(a => a.action_type === targetType);
-      if (found) {
-        results = parseInt(found.value ?? "0", 10);
-        break; // para no primeiro que encontrar
+      if (found && parseInt(found.value ?? "0", 10) > 0) {
+        results = parseInt(found.value, 10);
+        break;
       }
     }
   }
@@ -72,9 +71,9 @@ function extractInsights(
   if (targetTypes) {
     for (const targetType of targetTypes) {
       const found = cpaList.find(c => c.action_type === targetType);
-      if (found) {
-        cpr = parseFloat(found.value ?? "0");
-        if (cpr > 0) break;
+      if (found && parseFloat(found.value ?? "0") > 0) {
+        cpr = parseFloat(found.value);
+        break;
       }
     }
   }
@@ -323,13 +322,29 @@ export async function GET(req: NextRequest) {
         access_token: token, fields: "account_status,name,currency",
       });
 
-      // IMPORTANTE: A Meta API ignora time_range/date_preset em insights inline (insights{...}).
-      // O filtro de período deve ser passado como parâmetro separado na query de insights.
-      // Por isso buscamos campanhas sem filtro de período, e depois buscamos insights
-      // separadamente usando /{id}/insights com o parâmetro correto.
-      const insightParams: Record<string, string> = since && until
-        ? { time_range: JSON.stringify({ since, until }) }
-        : { date_preset: "last_7d" };
+      // Alinhado com o projeto de referência:
+      // Para presets padrão usa date_preset (last_7d, last_30d, etc)
+      // Só usa time_range quando o usuário escolhe datas customizadas
+      // Isso garante que os números batem com o Meta Ads Manager
+      const preset = searchParams.get("preset"); // "today"|"yesterday"|"7d"|"30d"
+      let insightParams: Record<string, string>;
+      if (preset === "today") {
+        const today = new Date().toISOString().slice(0, 10);
+        insightParams = { time_range: JSON.stringify({ since: today, until: today }) };
+      } else if (preset === "yesterday") {
+        const y = new Date(); y.setDate(y.getDate() - 1);
+        const yStr = y.toISOString().slice(0, 10);
+        insightParams = { time_range: JSON.stringify({ since: yStr, until: yStr }) };
+      } else if (preset === "7d") {
+        insightParams = { date_preset: "last_7d" };
+      } else if (preset === "30d") {
+        insightParams = { date_preset: "last_30d" };
+      } else if (since && until) {
+        // Custom range
+        insightParams = { time_range: JSON.stringify({ since, until }) };
+      } else {
+        insightParams = { date_preset: "last_7d" };
+      }
 
       // Helper: busca insights de um nó (campanha, adset, ad) com período correto
       async function fetchNodeInsights(nodeId: string): Promise<{ actions: ActionEntry[]; cpaList: ActionEntry[]; spend: number }> {
@@ -337,9 +352,6 @@ export async function GET(req: NextRequest) {
           const iData = await metaFetch(`/${nodeId}/insights`, {
             access_token: token,
             fields: "spend,actions,cost_per_action_type",
-            // action_report_time=conversion: mesmo método de atribuição do Meta Ads Manager
-            // Isso garante que os números batem com a coluna "Resultados" do Manager
-            action_report_time: "conversion",
             ...insightParams,
           });
           const row = (iData.data ?? [])[0] as Record<string, unknown> | undefined ?? {};
