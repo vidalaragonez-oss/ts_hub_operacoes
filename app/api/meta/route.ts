@@ -324,9 +324,14 @@ export async function GET(req: NextRequest) {
       for (const camp of (campaignData.data ?? []) as Record<string, unknown>[]) {
         const campId    = camp.id as string;
         const objective = (camp.objective as string) ?? "UNKNOWN";
+        const status    = (camp.status as string) ?? "UNKNOWN";
 
         // Busca insights da campanha com período correto (endpoint separado)
         const campIns = await fetchNodeInsights(campId);
+        // FILTRO ANTI-POLUIÇÃO: Ignora campanhas não-ativas que não gastaram nada no período
+        if (status !== "ACTIVE" && campIns.spend === 0) {
+          continue;
+        }
         const campInsights = extractInsights(campIns.actions, campIns.cpaList, campIns.spend, objective);
 
         let adsetNodes: AdSetNode[] = [];
