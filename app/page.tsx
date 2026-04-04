@@ -4328,6 +4328,30 @@ export default function Home() {
               </div>
             </div>
 
+            {/* ── Painel de Resultados da API (Mensagens/Leads) ── */}
+            {clienteAtivo.meta_ad_account_id && metaInsights[clienteAtivo.id] && metaInsights[clienteAtivo.id].total_leads > 0 && (
+              <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                    <Activity size={12} /> Resultados Oficiais (Meta API)
+                  </p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-[#e8e2d8]">{metaInsights[clienteAtivo.id].total_leads}</span>
+                    <span className="text-xs text-[#7a7268]">conversões no período</span>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[10px] text-[#7a7268] font-semibold uppercase tracking-widest mb-1">Distribuição</p>
+                  <p className="text-xs text-[#e8e2d8]">
+                    <span className="text-blue-400 font-bold">{metaInsights[clienteAtivo.id].messages}</span> Mensagens (Direct/Whats/Msgr)
+                  </p>
+                  <p className="text-xs text-[#e8e2d8]">
+                    <span className="text-emerald-400 font-bold">{metaInsights[clienteAtivo.id].form_leads}</span> Formulários Nativos
+                  </p>
+                </div>
+              </div>
+            )}
+
             {!leadsLoading&&<ClienteDashboard leads={filteredDashboardLeads}/>}
 
             {leadsLoading ? (
