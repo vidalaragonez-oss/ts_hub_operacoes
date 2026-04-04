@@ -2526,7 +2526,7 @@ function RadarWrapper({
   accountId:    string;
   token:        string | null;
   treeData:     MetaTreeData | null;
-  onFetch:      (clienteId: string, accountId: string, token: string | null, since: string, until: string) => void;
+  onFetch:      (clienteId: string, accountId: string, token: string | null, since: string, until: string, preset?: string) => void;
   moedaCliente?: 'BRL' | 'USD' | null;
 }) {
   const [preset,     setPreset]     = useState<RadarPreset>("7d");
@@ -2558,15 +2558,15 @@ function RadarWrapper({
 
   const isLoading = !treeData || treeData.loading;
 
-  // Função centralizada que busca e registra as datas ativas
   const doFetch = (p: RadarPreset, from?: string, to?: string) => {
     if (p === "custom" && from && to) {
       setActiveDates({ since: from, until: to });
-      onFetch(clienteId, accountId, token, from, to);
+      onFetch(clienteId, accountId, token, from, to, undefined);
     } else if (p !== "custom") {
       const dates = computeRadarDates(p);
       setActiveDates(dates);
-      onFetch(clienteId, accountId, token, dates.since, dates.until);
+      // Passa o preset para o route usar date_preset nativo do Meta
+      onFetch(clienteId, accountId, token, dates.since, dates.until, p);
     }
   };
 
@@ -3209,29 +3209,29 @@ export default function Home() {
     }
   };
 
-  // ── Busca árvore Radar Meta Ads (Campaigns → AdSets → Ads) ──────────────
   const fetchMetaTree = async (
     clienteId: string,
     accountId: string,
     token: string | null,
     since?: string,
     until?: string,
+    preset?: string,
   ) => {
     setMetaTree(prev => ({ ...prev, [clienteId]: { account_status: 0, account_name: "", currency: "BRL", groups: [], loading: true } }));
     try {
       const params = new URLSearchParams({ action: "tree", account_id: accountId });
       if (token) params.set("token", token);
-      // Sempre usa datas explícitas — nunca deixa o route usar date_preset sozinho
-      const fmt = (d: Date) => d.toISOString().slice(0, 10);
-      if (since && until) {
+      if (preset && ["today","yesterday","7d","30d"].includes(preset)) {
+        // Passa o preset diretamente — o route usa date_preset nativo do Meta
+        params.set("preset", preset);
+        // Mantém since/until para exibição no UI
+        if (since && until) { params.set("since", since); params.set("until", until); }
+      } else if (since && until) {
+        // Custom range — usa time_range
         params.set("since", since);
         params.set("until", until);
       } else {
-        // Fallback: últimos 7 dias até ontem (igual ao Meta Ads Manager)
-        const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-        const from = new Date(yesterday); from.setDate(yesterday.getDate() - 6);
-        params.set("since", fmt(from));
-        params.set("until", fmt(yesterday));
+        params.set("preset", "7d");
       }
       const res  = await fetch(`/api/meta?${params}`);
       const json = await res.json();
