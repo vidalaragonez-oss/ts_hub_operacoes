@@ -40,14 +40,35 @@ const OBJECTIVE_LABEL: Record<string, string> = {
 };
 
 const OBJECTIVE_ACTION_MAP: Record<string, string[]> = {
-  // Prioridade Leads: Form Nativo -> Mensagens -> Genérico
-  OUTCOME_LEADS:      ["onsite_conversion.lead_grouped", "leadgen", "leadgen_grouped", "onsite_conversion.messaging_conversation_started_7d", "lead"],
-  // Prioridade Engajamento: Mensagens -> Curtidas
-  OUTCOME_ENGAGEMENT: ["onsite_conversion.messaging_conversation_started_7d", "post_engagement"],
-  MESSAGES:           ["onsite_conversion.messaging_conversation_started_7d"],
-  OUTCOME_TRAFFIC:    ["link_click"],
-  // Prioridade Vendas: Compras -> Mensagens
-  OUTCOME_SALES:      ["purchase", "omni_purchase", "onsite_conversion.messaging_conversation_started_7d"],
+  // Prioridade Leads: Form Nativo -> Mensagens (ambas variantes) -> Genérico
+  // A Meta retorna 'messaging_conversation_started_7d' (sem prefixo) com janela 1d_view+7d_click
+  // e 'onsite_conversion.messaging_conversation_started_7d' com 7d_click apenas.
+  OUTCOME_LEADS: [
+    "onsite_conversion.lead_grouped",
+    "leadgen",
+    "leadgen_grouped",
+    "messaging_conversation_started_7d",
+    "onsite_conversion.messaging_conversation_started_7d",
+    "lead",
+  ],
+  // Prioridade Engajamento: Mensagens (ambas variantes) -> Curtidas
+  OUTCOME_ENGAGEMENT: [
+    "messaging_conversation_started_7d",
+    "onsite_conversion.messaging_conversation_started_7d",
+    "post_engagement",
+  ],
+  MESSAGES: [
+    "messaging_conversation_started_7d",
+    "onsite_conversion.messaging_conversation_started_7d",
+  ],
+  OUTCOME_TRAFFIC: ["link_click"],
+  // Prioridade Vendas: Compras -> Mensagens (ambas variantes)
+  OUTCOME_SALES: [
+    "purchase",
+    "omni_purchase",
+    "messaging_conversation_started_7d",
+    "onsite_conversion.messaging_conversation_started_7d",
+  ],
 };
 
 function extractInsights(
@@ -291,9 +312,9 @@ export async function GET(req: NextRequest) {
           const iData = await metaFetch(`/${nodeId}/insights`, {
             access_token: token,
             fields: "spend,actions,cost_per_action_type",
-            // Janela de atribuição igual ao Gerenciador: clique em 7 dias
-            // Sem isso a API usa 28d view + 7d click e retorna mais leads que o Manager
-            action_attribution_windows: '["7d_click"]',
+            // Janela igual ao Gerenciador de Anúncios: 1d_view + 7d_click
+            // Isso garante que "Conversas por mensagem" batam com o painel oficial
+            action_attribution_windows: '["1d_view","7d_click"]',
             ...insightParams,
           });
           const row = (iData.data ?? [])[0] as Record<string, unknown> | undefined ?? {};
@@ -418,7 +439,13 @@ export async function GET(req: NextRequest) {
       } catch { /* sem permissão */ }
 
       const iParams: Record<string, string> = {
-        access_token: token, fields: "campaign_id,campaign_name,spend,actions,cost_per_action_type", level: "campaign", limit: "500",
+        access_token: token,
+        fields: "campaign_id,campaign_name,spend,actions,cost_per_action_type",
+        level: "campaign",
+        limit: "500",
+        // Janela igual ao Gerenciador de Anúncios: 1d_view + 7d_click
+        // Sem isso a API usa padrão diferente e retorna menos conversas de mensagem
+        action_attribution_windows: '["1d_view","7d_click"]',
       };
       if (since && until) iParams.time_range = JSON.stringify({ since, until }); else iParams.date_preset = "maximum";
 
@@ -442,8 +469,13 @@ export async function GET(req: NextRequest) {
           if (["onsite_conversion.lead_grouped", "leadgen", "leadgen_grouped", "lead"].includes(ins.matchedType || "")) {
             campFormLeads = ins.results;
           }
-          // Soma mensagens E compras como 'resultados de negócio' para a meta
-          if (["onsite_conversion.messaging_conversation_started_7d", "purchase", "omni_purchase"].includes(ins.matchedType || "")) {
+          // Ambas variantes do event de mensagens (com e sem prefixo onsite_conversion.)
+          if ([
+            "messaging_conversation_started_7d",
+            "onsite_conversion.messaging_conversation_started_7d",
+            "purchase",
+            "omni_purchase",
+          ].includes(ins.matchedType || "")) {
             campMsgLeads = ins.results;
           }
           totalFormLeads += campFormLeads; totalMsgLeads += campMsgLeads;
