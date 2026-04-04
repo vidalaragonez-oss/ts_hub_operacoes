@@ -3934,9 +3934,6 @@ export default function Home() {
 
         {operacaoAtiva && !clienteAtivo && (
           <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* ── Dashboard Global da Diretoria (só admin) ── */}
-            {isAdmin && <MasterDashboard clientes={clientes} />}
-
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div>
                 <p className="text-[0.6rem] font-bold uppercase tracking-[0.18em] text-amber-500 mb-0.5">{operacaoAtiva.nome}</p>
