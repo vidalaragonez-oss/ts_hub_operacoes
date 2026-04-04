@@ -3149,13 +3149,6 @@ export default function Home() {
     const _fmtL=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; const _y=new Date(); _y.setDate(_y.getDate()-1); const _f=new Date(_y); _f.setDate(_f.getDate()-6);
     setDateFrom(_fmtL(_f)); setDateTo(_fmtL(_y)); setPeriodPreset("7d"); setCurrentPage(1);
     fetchLeads(cliente.id);
-    // Dispara árvore Radar ao entrar no cliente
-    if (cliente.meta_ad_account_id) {
-      const { since, until } = computeRadarDates("7d");
-      fetchMetaTree(cliente.id, cliente.meta_ad_account_id, cliente.meta_access_token ?? null, since, until);
-      // Busca insights do período padrão (7d) para o Painel Visual
-      fetchMetaInsights(cliente.id, cliente.meta_ad_account_id, cliente.meta_access_token ?? null, since, until);
-    }
     // Auto-sync silencioso de leads Meta
     if (cliente.meta_ad_account_id && operacaoAtiva) {
       syncMetaLeads(
@@ -4212,10 +4205,8 @@ export default function Home() {
                   {/* ── Barra de Meta Mensal no detalhe (base D-1) ── */}
                   {clienteAtivo.meta_leads_mensal != null && clienteAtivo.meta_leads_mensal > 0 && (() => {
                     const leadsDoMes = leadsDoMesPorCliente[clienteAtivo.id] ?? 0;
-                    // metaInsights é buscado sem período ao entrar no cliente → mês corrente
-                    // Tem prioridade sobre banco local (CSV uploads)
-                    const apiLeads = metaInsights[clienteAtivo.id]?.total_leads ?? 0;
-                    const totalResultados = apiLeads > 0 ? apiLeads : leadsDoMes;
+                    const cacheLeads = clienteAtivo.meta_leads_cache ?? 0;
+                    const totalResultados = cacheLeads > 0 ? cacheLeads : leadsDoMes;
                     return (
                       <div className="mt-1">
                         <MetaGoalBar meta={clienteAtivo.meta_leads_mensal} leadsDoMes={totalResultados} />
