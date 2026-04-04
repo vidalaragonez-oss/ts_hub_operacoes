@@ -329,6 +329,9 @@ export async function GET(req: NextRequest) {
           const iData = await metaFetch(`/${nodeId}/insights`, {
             access_token: token,
             fields: "spend,actions,cost_per_action_type",
+            // Janela de atribuição igual ao Gerenciador: clique em 7 dias
+            // Sem isso a API usa 28d view + 7d click e retorna mais leads que o Manager
+            action_attribution_windows: '["7d_click"]',
             ...insightParams,
           });
           const row = (iData.data ?? [])[0] as Record<string, unknown> | undefined ?? {};
