@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// ─── Supabase Admin Client (usa service_role para bypass RLS) ─────────────────
-// A chave SERVICE_ROLE deve estar em variáveis de ambiente — NUNCA exposta no client.
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+// ─── Supabase Admin Client (factory — instanciado dentro do handler) ─────────
+// NÃO instanciar no top-level: env vars não estão disponíveis no build time.
+function getSupabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  );
+}
 
 // ─── Meta API ─────────────────────────────────────────────────────────────────
 const META_API_VERSION = "v21.0";
@@ -183,6 +185,9 @@ export async function GET(req: NextRequest) {
   }
 
   const started = Date.now();
+
+  // Instancia dentro do handler — env vars disponíveis em runtime
+  const supabaseAdmin = getSupabaseAdmin();
 
   try {
     // ── Busca clientes a sincronizar ─────────────────────────────────────────
