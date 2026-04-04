@@ -19,7 +19,7 @@ async function metaFetch(path: string, params: Record<string, string>) {
 }
 
 type ActionEntry = { action_type: string; value: string };
-interface AdInsights { spend: number; results: number; cpr: number; matchedType?: string; }
+interface AdInsights { spend: number; results: number; cpr: number; matchedType?: string; formLeads: number; msgLeads: number; }
 interface AdNode { id: string; name: string; status: string; insights: AdInsights; }
 interface AdSetNode { id: string; name: string; status: string; insights: AdInsights; ads: AdNode[]; }
 interface CampaignNode {
@@ -39,56 +39,87 @@ const OBJECTIVE_LABEL: Record<string, string> = {
   MESSAGES: "Mensagens", UNKNOWN: "—",
 };
 
+// Action types que representam FORMULÁRIOS (lead nativo Meta)
+const FORM_LEAD_TYPES = [
+  "onsite_conversion.lead_grouped",
+  "leadgen_grouped",
+  "leadgen",
+  "lead",
+] as const;
+
+// Action types que representam MENSAGENS (WhatsApp/Direct/Messenger)
+// Dados brutos confirmados: a Meta sempre retorna "onsite_conversion.messaging_conversation_started_7d"
+// com valor 14 em TODAS as janelas de atribuição para campanhas WhatsApp sob OUTCOME_LEADS.
+const MSG_LEAD_TYPES = [
+  "onsite_conversion.messaging_conversation_started_7d",
+  "messaging_conversation_started_7d", // variante sem prefixo (fallback)
+] as const;
+
 const OBJECTIVE_ACTION_MAP: Record<string, string[]> = {
-  // Prioridade Leads: Form Nativo -> Mensagens (ambas variantes) -> Genérico
-  // A Meta retorna 'messaging_conversation_started_7d' (sem prefixo) com janela 1d_view+7d_click
-  // e 'onsite_conversion.messaging_conversation_started_7d' com 7d_click apenas.
-  OUTCOME_LEADS: [
-    "onsite_conversion.lead_grouped",
-    "leadgen",
-    "leadgen_grouped",
-    "messaging_conversation_started_7d",
-    "onsite_conversion.messaging_conversation_started_7d",
-    "lead",
-  ],
-  // Prioridade Engajamento: Mensagens (ambas variantes) -> Curtidas
-  OUTCOME_ENGAGEMENT: [
-    "messaging_conversation_started_7d",
-    "onsite_conversion.messaging_conversation_started_7d",
-    "post_engagement",
-  ],
-  MESSAGES: [
-    "messaging_conversation_started_7d",
-    "onsite_conversion.messaging_conversation_started_7d",
-  ],
-  OUTCOME_TRAFFIC: ["link_click"],
-  // Prioridade Vendas: Compras -> Mensagens (ambas variantes)
-  OUTCOME_SALES: [
-    "purchase",
-    "omni_purchase",
-    "messaging_conversation_started_7d",
-    "onsite_conversion.messaging_conversation_started_7d",
-  ],
+  // Para OUTCOME_LEADS usamos lógica especial em extractInsights (soma form + msg)
+  OUTCOME_LEADS:      [...FORM_LEAD_TYPES, ...MSG_LEAD_TYPES],
+  OUTCOME_ENGAGEMENT: [...MSG_LEAD_TYPES, "post_engagement"],
+  MESSAGES:           [...MSG_LEAD_TYPES],
+  OUTCOME_TRAFFIC:    ["link_click"],
+  OUTCOME_SALES:      ["purchase", "omni_purchase", ...MSG_LEAD_TYPES],
 };
+
+function getActionValue(actions: ActionEntry[], types: readonly string[]): { value: number; type: string } {
+  for (const t of types) {
+    const found = actions.find(a => a.action_type === t);
+    const v = parseInt(found?.value ?? "0", 10);
+    if (v > 0) return { value: v, type: t };
+  }
+  return { value: 0, type: "" };
+}
 
 function extractInsights(
   actions: ActionEntry[], cpaList: ActionEntry[], spend: number, objective = "UNKNOWN",
 ): AdInsights {
-  let results = 0;
+  let formLeads = 0;
+  let msgLeads  = 0;
   let matchedType = "";
 
-  // Usa sempre o OBJECTIVE_ACTION_MAP como fonte da verdade (ordem = prioridade).
-  // Isso garante que campanhas OUTCOME_LEADS criadas como WhatsApp/Mensagens
-  // também sejam capturadas via messaging_conversation_started_7d.
-  const targetTypes = OBJECTIVE_ACTION_MAP[objective] ?? OBJECTIVE_ACTION_MAP["OUTCOME_LEADS"];
-  for (const targetType of targetTypes) {
-    const found = actions.find(a => a.action_type === targetType);
-    if (found && parseInt(found.value ?? "0", 10) > 0) {
-      results = parseInt(found.value, 10);
-      matchedType = targetType;
-      break;
+  if (objective === "OUTCOME_LEADS" || objective === "LEAD_GENERATION") {
+    // Para campanhas de Leads: coleta AMBOS os buckets independentemente.
+    // Dados brutos confirmados: lead_grouped=4 e messaging_conversation_started_7d=14
+    // coexistem — o sistema antigo parava no lead_grouped e ignorava as mensagens.
+    const form = getActionValue(actions, FORM_LEAD_TYPES);
+    const msg  = getActionValue(actions, MSG_LEAD_TYPES);
+    formLeads = form.value;
+    msgLeads  = msg.value;
+    // matchedType = o que tiver mais resultados (para CPR)
+    if (msgLeads >= formLeads && msgLeads > 0) {
+      matchedType = msg.type;
+    } else if (formLeads > 0) {
+      matchedType = form.type;
+    }
+  } else if (objective === "MESSAGES" || objective === "OUTCOME_ENGAGEMENT") {
+    const msg = getActionValue(actions, MSG_LEAD_TYPES);
+    msgLeads    = msg.value;
+    matchedType = msg.type;
+  } else if (objective === "OUTCOME_SALES") {
+    const salesTypes = ["purchase", "omni_purchase"] as const;
+    const sale = getActionValue(actions, salesTypes);
+    if (sale.value > 0) {
+      msgLeads    = sale.value;
+      matchedType = sale.type;
+    } else {
+      const msg = getActionValue(actions, MSG_LEAD_TYPES);
+      msgLeads    = msg.value;
+      matchedType = msg.type;
+    }
+  } else {
+    // Outros objetivos: usa o mapa genérico
+    const targetTypes = OBJECTIVE_ACTION_MAP[objective];
+    if (targetTypes) {
+      const generic = getActionValue(actions, targetTypes);
+      msgLeads    = generic.value;
+      matchedType = generic.type;
     }
   }
+
+  const results = formLeads + msgLeads;
 
   let cpr = 0;
   if (matchedType) {
@@ -98,7 +129,7 @@ function extractInsights(
     }
   }
   if (cpr === 0 && results > 0) cpr = spend / results;
-  return { spend, results, cpr, matchedType };
+  return { spend, results, cpr, matchedType, formLeads, msgLeads };
 }
 
 // ─── Descobre page_ids vinculados a uma conta de anúncios ─────────────────────
@@ -465,19 +496,9 @@ export async function GET(req: NextRequest) {
           totalSpend += campSpend;
           const objective = objectiveMap.get(campId) ?? "UNKNOWN";
           const ins = extractInsights((row.actions as ActionEntry[]) ?? [], (row.cost_per_action_type as ActionEntry[]) ?? [], campSpend, objective);
-          let campFormLeads = 0; let campMsgLeads = 0;
-          if (["onsite_conversion.lead_grouped", "leadgen", "leadgen_grouped", "lead"].includes(ins.matchedType || "")) {
-            campFormLeads = ins.results;
-          }
-          // Ambas variantes do event de mensagens (com e sem prefixo onsite_conversion.)
-          if ([
-            "messaging_conversation_started_7d",
-            "onsite_conversion.messaging_conversation_started_7d",
-            "purchase",
-            "omni_purchase",
-          ].includes(ins.matchedType || "")) {
-            campMsgLeads = ins.results;
-          }
+          // formLeads e msgLeads já vêm separados do extractInsights (dual-bucket)
+          const campFormLeads = ins.formLeads;
+          const campMsgLeads  = ins.msgLeads;
           totalFormLeads += campFormLeads; totalMsgLeads += campMsgLeads;
           campaigns.push({ campaign_name: (row.campaign_name as string) ?? "Campanha", objective, objective_label: OL[objective] ?? objective, spend: campSpend.toFixed(2), form_leads: campFormLeads, msg_leads: campMsgLeads, form_cpl: campFormLeads > 0 ? ins.cpr : 0, msg_cpl: campMsgLeads > 0 ? ins.cpr : 0 });
         }
