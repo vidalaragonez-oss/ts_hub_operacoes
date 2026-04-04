@@ -27,6 +27,8 @@ import {
   Wifi,
   WifiOff,
   Search,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
@@ -701,10 +703,10 @@ export function ClienteModal({
         <div className="flex border-b border-[#2e2c29] bg-[#111010] shrink-0 px-1">
           {(["perfil", "campanhas", "financeiro", "integracoes"] as const).map(tab => {
             const labels: Record<string, string> = {
-              perfil: "👤 Perfil",
-              campanhas: "🎯 Camps.",
-              financeiro: "💰 Financeiro",
-              integracoes: "🔌 Integrações",
+              perfil: "Perfil",
+              campanhas: "Camps.",
+              financeiro: "Financeiro",
+              integracoes: "Integrações",
             };
             return (
               <button
@@ -791,7 +793,7 @@ export function ClienteModal({
                         ? "bg-amber-500 border-amber-400 text-[#111]"
                         : "bg-[#201f1d] border-[#2e2c29] text-[#7a7268]"
                     }`}>
-                    👤 {initial.gestor_estrategico} ↩
+                    <User size={12} className="inline-block mr-1" />{initial.gestor_estrategico} ↩
                   </button>
                )}
                 {gestoresEstrat.length === 0 && (
@@ -936,7 +938,7 @@ export function ClienteModal({
                           : "bg-blue-500/15 border-blue-500/40 text-blue-400"
                         : "bg-[#201f1d] border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8] hover:border-[#7a7268]"
                     }`}>
-                    {c === 'BRL' ? '🇧🇷 R$ — Real' : '🇺🇸 US$ — Dólar'}
+                    {c === 'BRL' ? 'R$ — Real' : 'US$ — Dólar'}
                   </button>
                 ))}
               </div>
@@ -1178,7 +1180,7 @@ export function ClienteModal({
                                         ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/25"
                                         : "text-orange-400 bg-orange-500/10 border-orange-500/25"
                                     }`}>
-                                      {acc.status === 1 ? "ATIVA" : "⚠️"}
+                                      {acc.status === 1 ? "ATIVA" : "!"}
                                     </span>
                                     {isSelected && (
                                       <Check size={13} className="text-emerald-400" />
@@ -1412,11 +1414,11 @@ export function SettingsModal({
                 </button>
               </div>
               <p className="text-[10px] text-[#7a7268] pt-1 leading-relaxed">
-                <span className="text-amber-500/70">✦</span> Ao renomear, todos os clientes vinculados são atualizados em cascata.
+                <Sparkles size={12} className="text-amber-500/70 shrink-0" /> Ao renomear, todos os clientes vinculados são atualizados em cascata.
               </p>
               <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 mt-2">
                 <p className="text-[10px] text-blue-400/80 leading-relaxed">
-                  <span className="font-bold">ℹ️</span> Apenas gestores com{" "}
+                  <Info size={14} className="shrink-0 text-[#7a7268]" /> Apenas gestores com{" "}
                   <code className="bg-blue-500/10 px-1 rounded text-[9px]">ativo_na_selecao = true</code>{" "}
                   aparecem nos dropdowns de cadastro. Configure pelo Supabase.
                 </p>
@@ -1639,7 +1641,7 @@ export function ReportBugModal({
       });
       if (error) throw error;
 
-      toast.success("Bug reportado com sucesso! Obrigado pelo feedback. 🐛");
+      toast.success("Bug reportado com sucesso! Obrigado pelo feedback.");
       setDescricao("");
       setImageFile(null);
       setImagePreview(null);
@@ -1850,7 +1852,7 @@ export function AdminBugsModal({
         prev.map((b) => (b.id === id ? { ...b, status: newStatus } : b))
       );
       toast.success(
-        newStatus === "resolvido" ? "Bug marcado como resolvido ✅" : "Bug reaberto"
+        newStatus === "resolvido" ? "Bug marcado como resolvido" : "Bug reaberto"
       );
     } catch (err: unknown) {
       toast.error(
