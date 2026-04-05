@@ -46,7 +46,6 @@ import {
   ShieldCheck,
   History,
   LayoutGrid,
-  LogOut,
 } from "lucide-react";
 import {
   NovaOperacaoModal,
