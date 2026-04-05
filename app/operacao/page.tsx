@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 import { toast } from "sonner";
@@ -43,8 +44,9 @@ import {
   Bell,
   CreditCard,
   AlertTriangle,
-  Shield,
+  ShieldCheck,
   History,
+  LayoutGrid,
 } from "lucide-react";
 import {
   NovaOperacaoModal,
@@ -2866,7 +2868,9 @@ function normalizeCliente(raw: Record<string, unknown>): Cliente {
 // PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export default function Home() {
+function OperacaoInner() {
+  const searchParams = useSearchParams();
+  const unidadeParam = searchParams.get("unidade");
   const router = useRouter();
 
   const [perfil, setPerfil]           = useState<GestorPerfil | null>(null);
@@ -3059,7 +3063,14 @@ export default function Home() {
       if (error) throw error;
       const ops = (data as Operacao[]) ?? [];
       setOperacoes(ops);
-      if (ops.length > 0) { setOperacaoAtiva(ops[0]); fetchClientes(ops[0].id); }
+      if (ops.length > 0) {
+        // Auto-seleciona: se a URL tiver ?unidade=nome, usa ela; senão usa a primeira
+        const target = unidadeParam
+          ? (ops.find(o => o.nome === unidadeParam) ?? ops[0])
+          : ops[0];
+        setOperacaoAtiva(target);
+        fetchClientes(target.id);
+      }
     } catch (err: unknown) {
       toast.error(`Erro ao carregar operações: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
     } finally {
@@ -3786,151 +3797,108 @@ export default function Home() {
 
       <header className="sticky top-0 z-50 shrink-0 border-b border-[#2e2c29] bg-[#111010]/90 backdrop-blur-xl">
         <div className="flex items-center justify-between gap-2 px-4 md:px-6 h-14">
-          
-          <div className="flex items-center gap-2 shrink-0">
-            <div
-              onClick={() => clienteAtivo && backToDashboard()}
-              className={`flex items-center gap-2 ${clienteAtivo ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-              title={clienteAtivo ? "Voltar à tela inicial" : ""}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/LOGO-PRINCIPAL.svg" alt="TS HUB" className="h-8 w-auto"/>
-              <div className="hidden xs:block">
-                <p className="font-bold text-[0.95rem] leading-none tracking-tight">TS <span className="text-amber-500">HUB</span></p>
-                <p className="text-[9px] text-[#4a4844] leading-none mt-0.5 hidden sm:block">Sua operação sob controle total.</p>
-              </div>
+
+          {/* ── Esquerda: Logo + LayoutGrid + Voltar ── */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/LOGO-PRINCIPAL.svg" alt="TS HUB" className="h-8 w-auto"/>
+            <div className="hidden sm:block ml-1">
+              <p className="font-bold text-[0.95rem] leading-none tracking-tight">TS <span className="text-amber-500">HUB</span></p>
             </div>
+            {/* Grid → volta ao Hub */}
+            <button
+              onClick={() => router.push("/hub")}
+              title="Portal de Operações"
+              className="ml-1 flex items-center justify-center w-8 h-8 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] hover:text-amber-400 hover:border-amber-500/40 transition-colors"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            {/* Voltar ao dashboard da operação (quando está dentro de um cliente) */}
             {clienteAtivo && (
               <button onClick={backToDashboard}
-                className="ml-1 flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-[#e8e2d8] hover:border-[#7a7268] transition-colors">
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-[#e8e2d8] hover:border-[#7a7268] transition-colors">
                 <ChevronLeft size={14} /> <span className="hidden md:inline">Voltar</span>
               </button>
             )}
           </div>
 
-          <div className="flex-1 flex justify-center px-2 min-w-0">
-            {operacoesLoading ? (
-              <div className="flex items-center gap-2 text-[#7a7268] text-xs animate-pulse">
-                <div className="w-3 h-3 rounded-full border border-t-amber-500 animate-spin"/>
-                <span className="hidden sm:inline">Carregando...</span>
-              </div>
-            ) : (
-              <>
-                <div className="hidden sm:flex items-center gap-1.5 overflow-x-auto no-scrollbar max-w-sm">
-                  {operacoes.map(op => (
-                    <button key={op.id} onClick={()=>handleSelectOperacao(op)}
-                      className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                        operacaoAtiva?.id===op.id
-                          ? "bg-amber-500 border-amber-400 text-[#111] shadow-[0_2px_10px_rgba(245,166,35,0.3)]"
-                          : "bg-[#201f1d] border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8] hover:border-[#7a7268]"
-                      }`}>{op.nome}</button>
-                  ))}
-                  {isAdmin && (
-                    <button onClick={()=>setNovaOpOpen(true)} title="Nova Operação"
-                      className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-xl bg-[#201f1d] border border-dashed border-[#3a3835] text-[#7a7268] hover:text-amber-400 hover:border-amber-500/40 transition-all text-sm font-bold">+</button>
-                  )}
-                  {isAdmin && (
-                    <button onClick={()=>router.push("/diretoria")} title="Dashboard da Diretoria"
-                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all">
-                      📊 <span className="hidden lg:inline">Diretoria</span>
-                    </button>
-                  )}
-                </div>
-                <div className={`sm:hidden relative ${operacoes.length <= 1 ? "hidden" : ""}`}>
-                  <button onClick={()=>setOpDropdownOpen(v=>!v)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 border border-amber-400 text-[#111] text-xs font-bold shadow-[0_2px_10px_rgba(245,166,35,0.3)] max-w-[140px] truncate">
-                    <span className="truncate">{operacaoAtiva?.nome ?? "Operação"}</span>
-                    <ChevronDown size={14} className={`shrink-0 transition-transform ${opDropdownOpen?"rotate-180":""}`} />
-                  </button>
-                  {opDropdownOpen && (
-                    <div className="absolute left-1/2 -translate-x-1/2 top-10 z-[60] w-48 rounded-xl border border-[#2e2c29] bg-[#1a1917] shadow-xl shadow-black/60 py-1 overflow-hidden">
-                      {operacoes.map(op => (
-                        <button key={op.id} onClick={()=>handleSelectOperacao(op)}
-                          className={`w-full text-left px-4 py-2.5 text-xs font-semibold transition-colors ${
-                            operacaoAtiva?.id===op.id ? "text-amber-400 bg-amber-500/10" : "text-[#e8e2d8] hover:bg-[#2e2c29]"
-                          }`}>{op.nome}</button>
-                      ))}
-                      {isAdmin && (
-                        <button onClick={()=>{setNovaOpOpen(true);setOpDropdownOpen(false);}}
-                          className="w-full text-left px-4 py-2.5 text-xs font-semibold text-amber-400 hover:bg-[#2e2c29] border-t border-[#2e2c29] transition-colors flex items-center gap-2">
-                          <Plus size={14} /> Nova Operação
-                        </button>
-                      )}
-                      {isAdmin && (
-                        <button onClick={()=>{router.push("/diretoria");setOpDropdownOpen(false);}}
-                          className="w-full text-left px-4 py-2.5 text-xs font-semibold text-violet-400 hover:bg-[#2e2c29] border-t border-[#2e2c29] transition-colors flex items-center gap-2">
-                          📊 Dashboard Diretoria
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </>
+          {/* ── Centro: Nome da operação + indicador de pendências ── */}
+          <div className="flex-1 flex items-center justify-center gap-2 px-2 min-w-0">
+            {operacaoAtiva && !clienteAtivo && (
+              <span className="text-xs font-bold text-[#4a4844] uppercase tracking-widest truncate">
+                {operacaoAtiva.nome}
+              </span>
+            )}
+            {/* Indicador de pendências de pagamento */}
+            {!clienteAtivo && clientes.filter(c=>c.alerta_pagamento).length > 0 && (
+              <button
+                onClick={() => setPendenciasFilter(v => !v)}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[0.65rem] font-bold border transition-all ${
+                  pendenciasFilter
+                    ? "bg-red-500/20 border-red-500/50 text-red-400"
+                    : "bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20"
+                }`}
+              >
+                <AlertTriangle size={9} className="shrink-0" />
+                {clientes.filter(c=>c.alerta_pagamento).length}
+              </button>
             )}
           </div>
 
+          {/* ── Direita: Ferramentas essenciais ── */}
           <div className="flex items-center gap-1.5 shrink-0">
 
-            {/* ── Botão: Auditoria (somente admin) ── */}
+            {/* Auditoria — somente admin */}
             {perfil?.role === "admin" && (
-              <button
-                onClick={() => setIsAuditOpen(true)}
-                title="Painel de Auditoria"
-                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-violet-400 hover:border-violet-500/40 transition-colors"
-              >
-                <Shield size={14} />
+              <button onClick={() => setIsAuditOpen(true)} title="Painel de Auditoria"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-violet-400 hover:border-violet-500/40 transition-colors">
+                <ShieldCheck size={14} />
                 <span className="hidden md:inline">Auditoria</span>
               </button>
             )}
 
-            {/* ── Botão: Notificações de Bugs (somente admin) ── */}
+            {/* Bugs — somente admin */}
             {perfil?.role === "admin" && (
-              <button
-                onClick={() => setIsAdminBugsOpen(true)}
-                title="Notificações de Bugs"
-                className="hidden sm:flex relative items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-amber-400 hover:border-amber-500/40 transition-colors"
-              >
-                <Bell size={14} />
+              <button onClick={() => setIsAdminBugsOpen(true)} title="Notificações de Bugs"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-amber-400 hover:border-amber-500/40 transition-colors">
+                <Bug size={14} />
                 <span className="hidden md:inline">Bugs</span>
               </button>
             )}
 
-            {/* ── Botão: Reportar Bug (todos os usuários) ── */}
+            {/* Reportar Bug — todos */}
             {perfil && (
-              <button
-                onClick={() => setIsBugModalOpen(true)}
-                title="Reportar Bug"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-orange-400 hover:border-orange-500/40 transition-colors"
-              >
+              <button onClick={() => setIsBugModalOpen(true)} title="Reportar Bug"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-orange-400 hover:border-orange-500/40 transition-colors">
                 <Bug size={14} />
-                <span className="hidden md:inline">Reportar Bug</span>
               </button>
             )}
 
-            {clienteAtivo ? (
-              <>
-               
-              </>
-            ) : (
+            {/* Config + Novo Cliente — só fora da view de cliente */}
+            {!clienteAtivo && (
               <>
                 {isAdmin && (
-                  <button onClick={()=>setSettingsOpen(true)}
+                  <button onClick={() => setSettingsOpen(true)} title="Configurações"
                     className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-[#e8e2d8] hover:border-[#7a7268] transition-colors">
-                    <SettingsIcon size={14} /> <span className="hidden md:inline">Config.</span>
+                    <SettingsIcon size={14} />
+                    <span className="hidden md:inline">Config.</span>
                   </button>
                 )}
-                <button onClick={()=>operacaoAtiva&&setClienteModal({mode:"new"})} disabled={!operacaoAtiva}
+                <button onClick={() => operacaoAtiva && setClienteModal({mode:"new"})} disabled={!operacaoAtiva}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500 text-[#111] text-xs font-bold hover:bg-amber-400 active:scale-95 transition-all shadow-[0_2px_12px_rgba(245,166,35,0.3)] disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap">
-                  <Plus size={14} /> <span className="hidden sm:inline">Novo Cliente</span><span className="sm:hidden">Novo</span>
+                  <PlusCircle size={14} />
+                  <span className="hidden sm:inline">Novo Cliente</span>
+                  <span className="sm:hidden">Novo</span>
                 </button>
               </>
             )}
+
             <div className="w-px h-5 bg-[#2e2c29] mx-0.5 hidden sm:block" />
+
+            {/* Sair */}
             <button onClick={handleLogout} title={`Sair (${perfil?.nome ?? ""})`}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-red-400 hover:border-red-500/40 transition-colors group">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-x-0.5">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-red-400 hover:border-red-500/40 transition-colors group">
+              <LogOut size={13} className="transition-transform group-hover:translate-x-0.5" />
               <span className="hidden sm:inline">Sair</span>
             </button>
           </div>
@@ -4649,5 +4617,19 @@ export default function Home() {
         </button>
       )}
     </div>
+  );
+}
+
+
+// Suspense wrapper required for useSearchParams in Next.js App Router
+export default function OperacaoPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#111010] flex items-center justify-center">
+        <div className="w-7 h-7 rounded-full border-2 border-amber-500/20 border-t-amber-500 animate-spin" />
+      </div>
+    }>
+      <OperacaoInner />
+    </Suspense>
   );
 }
