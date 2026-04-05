@@ -1655,8 +1655,8 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
           const temOrc = totalOrc > 0;
           const temMeta = (client.meta_leads_mensal ?? 0) > 0;
           if (!temOrc && !temMeta) return null;
-          const orcSymbol = (client.moeda ?? "BRL") === "USD" ? "US$" : "R$";
-          const orcCurrency = (client.moeda ?? "BRL") === "USD" ? "USD" : "BRL";
+          const orcSymbol = (client.moeda ?? "USD") === "USD" ? "US$" : "R$";
+          const orcCurrency = (client.moeda ?? "USD") === "USD" ? "USD" : "BRL";
           return (
             <div className="flex items-center gap-1.5 flex-wrap mt-0.5 group/budget">
               {temOrc && (
@@ -1686,8 +1686,6 @@ function ClientCard({ client, onSelect, onEdit, onDeactivate, onDelete, onToggle
             </div>
           );
         })()}
-        {/* Dados de performance do cache (meta_*_cache) — sem chamada à API */}
-        {client.meta_ad_account_id && <MetaSummary client={client} />}
       </div>
 
       {/* Row 3 — MetaGoalBar ancorada acima do rodapé (só aparece se tiver meta) */}
@@ -1764,8 +1762,8 @@ function ClientRow({ client, onSelect, onEdit, onDeactivate, onDelete, onToggleA
               const temOrc = totalOrc > 0;
               const temMeta = (client.meta_leads_mensal ?? 0) > 0;
               if (!temOrc && !temMeta) return null;
-              const orcSymbol = (client.moeda ?? "BRL") === "USD" ? "US$" : "R$";
-              const orcCurrency = (client.moeda ?? "BRL") === "USD" ? "USD" : "BRL";
+              const orcSymbol = (client.moeda ?? "USD") === "USD" ? "US$" : "R$";
+              const orcCurrency = (client.moeda ?? "USD") === "USD" ? "USD" : "BRL";
               return (
                 <div className="flex items-center gap-1 flex-wrap mt-0.5">
                   {temOrc && (
@@ -2846,7 +2844,7 @@ function normalizeCliente(raw: Record<string, unknown>): Cliente {
     verba_gls:          raw.verba_gls          != null ? Number(raw.verba_gls)          : null,
     verba_outros:       raw.verba_outros       != null ? Number(raw.verba_outros)       : null,
     gls_account_id:     (raw.gls_account_id    as string) ?? null,
-    moeda:              (raw.moeda as 'BRL' | 'USD' | null) ?? null,
+    moeda:              (raw.moeda as 'BRL' | 'USD' | null) ?? 'USD',
     // Cache de métricas Meta (preenchido pelo cron de sync)
     meta_spend_cache:   raw.meta_spend_cache != null ? Number(raw.meta_spend_cache) : null,
     meta_leads_cache:   raw.meta_leads_cache != null ? Number(raw.meta_leads_cache) : null,
