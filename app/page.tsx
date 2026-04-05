@@ -2549,13 +2549,14 @@ function RadarTree({
 
 // ─── RadarWrapper: componente com estado próprio ──────────────────────────────
 function RadarWrapper({
-  clienteId, accountId, token, treeData, onFetch, moedaCliente,
+  clienteId, accountId, token, treeData, onFetch, moedaCliente, ignoreIds,
 }: {
   clienteId:    string;
   accountId:    string;
   token:        string | null;
   treeData:     MetaTreeData | null;
-  onFetch:      (clienteId: string, accountId: string, token: string | null, since: string, until: string, preset?: string) => void;
+  onFetch:      (clienteId: string, accountId: string, token: string | null, since: string, until: string, preset?: string, ignoreIds?: string[] | null) => void;
+  ignoreIds?:   string[] | null;
   moedaCliente?: 'BRL' | 'USD' | null;
 }) {
   const [preset,     setPreset]     = useState<RadarPreset>("7d");
@@ -2590,12 +2591,12 @@ function RadarWrapper({
   const doFetch = (p: RadarPreset, from?: string, to?: string) => {
     if (p === "custom" && from && to) {
       setActiveDates({ since: from, until: to });
-      onFetch(clienteId, accountId, token, from, to, undefined);
+      onFetch(clienteId, accountId, token, from, to, undefined, ignoreIds);
     } else if (p !== "custom") {
       const dates = computeRadarDates(p);
       setActiveDates(dates);
-      // Passa o preset para o route usar date_preset nativo do Meta
-      onFetch(clienteId, accountId, token, dates.since, dates.until, p);
+      // Passa o preset e blacklist para o route
+      onFetch(clienteId, accountId, token, dates.since, dates.until, p, ignoreIds);
     }
   };
 
@@ -3321,6 +3322,7 @@ export default function Home() {
     token: string | null,
     since?: string,
     until?: string,
+    ignoreIds?: string[] | null,
   ) => {
     // Com período → atualiza metaInsightsFiltro (Painel Visual do período)
     // Sem período → busca mês corrente e atualiza metaInsights (pacing/MetaGoalBar)
@@ -3330,6 +3332,7 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ action: "insights", account_id: accountId });
       if (token) params.set("token", token);
+      if (ignoreIds && ignoreIds.length > 0) params.set("ignore_ids", ignoreIds.join(","));
       if (since && until) {
         params.set("since", since);
         params.set("until", until);
@@ -3402,11 +3405,13 @@ export default function Home() {
     since?: string,
     until?: string,
     preset?: string,
+    ignoreIds?: string[] | null,
   ) => {
     setMetaTree(prev => ({ ...prev, [clienteId]: { account_status: 0, account_name: "", currency: "BRL", groups: [], loading: true } }));
     try {
       const params = new URLSearchParams({ action: "tree", account_id: accountId });
       if (token) params.set("token", token);
+      if (ignoreIds && ignoreIds.length > 0) params.set("ignore_ids", ignoreIds.join(","));
       if (preset && ["today","yesterday","7d","30d","this_month"].includes(preset)) {
         // Passa o preset diretamente — o route usa date_preset nativo do Meta
         params.set("preset", preset);
@@ -3719,6 +3724,7 @@ export default function Home() {
       clienteAtivo.meta_access_token ?? null,
       dateFrom,
       dateTo,
+      clienteAtivo.meta_ignored_campaigns,
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateFrom, dateTo, clienteAtivo?.id]);
@@ -4368,6 +4374,7 @@ export default function Home() {
                 treeData={metaTree[clienteAtivo.id] ?? null}
                 onFetch={fetchMetaTree}
                 moedaCliente={clienteAtivo.moeda ?? null}
+                ignoreIds={clienteAtivo.meta_ignored_campaigns ?? null}
               />
             )}
 
