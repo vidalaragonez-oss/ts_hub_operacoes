@@ -2882,13 +2882,14 @@ function OperacaoContent() {
   const [clienteModal, setClienteModal]       = useState<{ mode:"new"|"edit"; client?: Cliente; initialTab?: "perfil"|"campanhas"|"financeiro"|"integracoes" } | null>(null);
   const [editModal, setEditModal]             = useState<Cliente | null>(null);
 
+  // ── Leads do Mês por Cliente (para barra de meta) ──────────────────────────
+  const [leadsDoMesPorCliente, setLeadsDoMesPorCliente] = useState<Record<string, number>>({});
+
   const [leadsLoading, setLeadsLoading] = useState(false);
   const [currentPage, setCurrentPage]   = useState(1);
   const [newLeadOpen, setNewLeadOpen]   = useState(false);
   // Dashboard: dataset completo (sem paginação) para cálculos de métricas
   const [allLeadsForDashboard, setAllLeadsForDashboard] = useState<Lead[]>([]);
-  // Contagem de leads do mês por cliente — usada nos cards do grid
-  const [leadsDoMesPorCliente, setLeadsDoMesPorCliente] = useState<Record<string, number>>({});
   const [leadSearch, setLeadSearch]     = useState("");
   const [platFilter, setPlatFilter]     = useState("");
   const _initDates = (() => { const fmt=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; const y=new Date(); y.setDate(y.getDate()-1); const f=new Date(y); f.setDate(f.getDate()-6); return {from:fmt(f),to:fmt(y)}; })();
@@ -3086,6 +3087,7 @@ function OperacaoContent() {
       setClientes(rows);
       // Busca leads do mês atual por cliente (para barra de meta — banco local)
       // fetchMetaInsights removido do carregamento automático: os cards agora usam
+      // meta_*_cache (preenchido pelo cron). Chamada só ocorre ao entrar num cliente.
       fetchLeadsDoMesBatch(rows.map(r => r.id));
     } catch (err: unknown) {
       toast.error(`Erro ao carregar clientes: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
@@ -3095,15 +3097,19 @@ function OperacaoContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Busca contagem de leads do mês atual para cada cliente (base D-1 — pacing dos cards)
+  // Busca contagem de leads do mês atual para cada cliente (base D-1 — pacing)
   const fetchLeadsDoMesBatch = useCallback(async (clienteIds: string[]) => {
     if (!clienteIds.length) return;
     try {
       const now     = new Date();
       const ano     = now.getFullYear();
-      const mes     = now.getMonth();
+      const mes     = now.getMonth(); // 0-based
+
+      // Início do mês vigente
       const mesInicio = new Date(ano, mes, 1).toISOString().slice(0, 10);
-      const mesFim    = new Date(ano, mes + 1, 0).toISOString().slice(0, 10);
+      // Fim do mês vigente (para capturar todos os leads do mês corrente)
+      const mesFim = new Date(ano, mes + 1, 0).toISOString().slice(0, 10);
+
       const { data, error } = await supabase
         .from("leads")
         .select("cliente, data, plataforma, meta_lead_id")
@@ -3114,8 +3120,11 @@ function OperacaoContent() {
       const counts: Record<string, number> = {};
       for (const row of (data ?? []) as { cliente: string; data: string; plataforma: string; meta_lead_id: string | null }[]) {
         if (!row.cliente) continue;
+        // DNA de Lead: Meta → apenas messaging_first_reply ou lead (via meta_lead_id presente)
+        // Manual/CSV → conta sempre
         const plat = (row.plataforma ?? "").toLowerCase();
-        if (plat.includes("meta") && !row.meta_lead_id) continue;
+        const isMeta = plat.includes("meta");
+        if (isMeta && !row.meta_lead_id) continue; // Meta orgânico sem ID → ignora
         counts[row.cliente] = (counts[row.cliente] ?? 0) + 1;
       }
       setLeadsDoMesPorCliente(counts);
@@ -3152,14 +3161,10 @@ function OperacaoContent() {
   const handleSelectCliente = useCallback((cliente: Cliente) => {
     scrollPosRef.current = window.scrollY; // Salva a posição
     setClienteAtivo(cliente); setLeadSearch(""); setPlatFilter("");
-    // Padrão: Este Mês — garante que leads de hoje aparecem na lista e barra de meta
-    const _fmtL=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    const _hoje = new Date();
-    const _inicioMes = new Date(_hoje.getFullYear(), _hoje.getMonth(), 1);
-    setDateFrom(_fmtL(_inicioMes)); setDateTo(_fmtL(_hoje)); setPeriodPreset("this_month"); setCurrentPage(1);
-    // Sempre carrega leads do banco primeiro (inclui manuais, CSV, WhatsApp, etc.)
+    const _fmtL=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; const _y=new Date(); _y.setDate(_y.getDate()-1); const _f=new Date(_y); _f.setDate(_f.getDate()-6);
+    setDateFrom(_fmtL(_f)); setDateTo(_fmtL(_y)); setPeriodPreset("7d"); setCurrentPage(1);
     fetchLeads(cliente.id);
-    // Se tem Meta configurado, sincroniza em seguida — o sync recarrega o estado do banco ao terminar
+    // Auto-sync silencioso de leads Meta
     if (cliente.meta_ad_account_id && operacaoAtiva) {
       syncMetaLeads(
         cliente.id,
@@ -3480,37 +3485,48 @@ function OperacaoContent() {
   ) => {
     if (metaSyncRunning.current) return;
     metaSyncRunning.current = true;
-    setLeadsLoading(true);
     try {
       const params = new URLSearchParams({ action: "leads", account_id: accountId });
       if (token) params.set("token", token);
       const res  = await fetch(`/api/meta?${params}`);
       const json = await res.json();
-      if (json.error || !json.leads?.length) {
-        // API sem leads — não sobrescreve o estado (fetchLeads já carregou os leads do banco)
-        return;
-      }
+      if (json.error || !json.leads?.length) return;
 
-      // Deduplicação dentro do próprio array retornado pela API (evita upsert duplicado no batch)
+      // Busca leads existentes deste cliente para deduplicar
+      const { data: existing } = await supabase
+        .from("leads")
+        .select("meta_lead_id, email, nome")
+        .eq("cliente", clienteId);
+
+      const existingMetaIds = new Set(
+        (existing ?? []).map((r: { meta_lead_id: string }) => r.meta_lead_id).filter(Boolean)
+      );
+      // Chave secundária: email normalizado (evita duplicar mesmo lead sem meta_lead_id)
+      const existingEmails = new Set(
+        (existing ?? []).map((r: { email: string }) => (r.email ?? "").toLowerCase().trim()).filter(Boolean)
+      );
+
+      // Deduplicação tripla:
+      // 1. meta_lead_id já no banco
+      // 2. email já no banco
+      // 3. duplicatas dentro do próprio array retornado pela API
       const seenInBatch = new Set<string>();
-      const leadsParaSync = (json.leads as {
+      const novos = (json.leads as {
         meta_lead_id: string; nome: string; email: string;
         telefone: string; created_time: string;
       }[]).filter(l => {
-        if (!l.meta_lead_id) return false; // sem meta_lead_id não podemos fazer upsert seguro
-        if (seenInBatch.has(l.meta_lead_id)) return false;
-        seenInBatch.add(l.meta_lead_id);
+        if (existingMetaIds.has(l.meta_lead_id)) return false;
+        const emailKey = (l.email ?? "").toLowerCase().trim();
+        if (emailKey && existingEmails.has(emailKey)) return false;
+        const batchKey = l.meta_lead_id || emailKey;
+        if (batchKey && seenInBatch.has(batchKey)) return false;
+        if (batchKey) seenInBatch.add(batchKey);
         return true;
       });
 
-      if (!leadsParaSync.length) {
-        // Nada novo para sincronizar — não sobrescreve o estado existente
-        return;
-      }
+      if (!novos.length) return;
 
-      // UPSERT usando meta_lead_id como chave única — garante que todo lead da API entra no banco
-      // e que re-sync não duplica registros existentes
-      const rows = leadsParaSync.map(l => ({
+      const rows = novos.map(l => ({
         meta_lead_id: l.meta_lead_id,
         nome:         l.nome || null,
         email:        l.email || null,
@@ -3522,53 +3538,16 @@ function OperacaoContent() {
         operacao_id:  operacaoId,
       }));
 
-      const { error: upsertError } = await supabase
-        .from("leads")
-        .upsert(rows, { onConflict: "meta_lead_id", ignoreDuplicates: false });
-
-      if (upsertError) {
-        // Fallback: tenta insert ignorando duplicatas (funciona mesmo sem constraint UNIQUE)
-        console.warn("[syncMetaLeads] upsert falhou, tentando insert com ignoreDuplicates:", upsertError.message);
-        const { error: insertError } = await supabase
-          .from("leads")
-          .insert(rows)
-          .select();
-        if (insertError && !insertError.message.includes("duplicate")) {
-          toast.error(`Sync Meta falhou: ${insertError.message}`);
-          throw insertError;
-        }
+      const { data: inserted, error } = await supabase.from("leads").insert(rows).select();
+      if (error) throw error;
+      if (inserted?.length) {
+        setAllLeadsForDashboard(prev => [...((inserted as Lead[]) ?? []), ...prev]);
+        toast.success(`${inserted.length} lead(s) Meta sincronizado(s).`);
       }
-
-      // FONTE ÚNICA: após upsert, recarrega TODOS os leads do banco para este cliente
-      // Isso garante que allLeadsForDashboard, leadsDoMes e totalLeadsCount sejam precisos
-      const { data: allLeadsAtualizados, error: fetchError } = await supabase
-        .from("leads").select("*").eq("cliente", clienteId)
-        .order("created_at", { ascending: false });
-
-      if (fetchError) throw fetchError;
-
-      const leadsAtualizados = (allLeadsAtualizados ?? []) as Lead[];
-      setAllLeadsForDashboard(leadsAtualizados);
-
-      // Atualiza também o contador da barra de meta nos cards (leadsDoMesPorCliente)
-      const now = new Date();
-      const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-      const mesFim    = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-      const leadsDoMesCount = leadsAtualizados.filter(l => {
-        const plat = (l.plataforma ?? "").toLowerCase();
-        if (plat.includes("meta") && !l.meta_lead_id) return false;
-        return l.data >= mesInicio && l.data <= mesFim;
-      }).length;
-      setLeadsDoMesPorCliente(prev => ({ ...prev, [clienteId]: leadsDoMesCount }));
-
-      const novosCount = leadsParaSync.length;
-      toast.success(`${novosCount} lead(s) Meta sincronizado(s).`);
     } catch (err: unknown) {
       console.error("[syncMetaLeads] Erro:", err instanceof Error ? err.message : String(err));
-      toast.error(`Sync Meta: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
     } finally {
       metaSyncRunning.current = false;
-      setLeadsLoading(false);
     }
   };
 
@@ -4233,15 +4212,18 @@ function OperacaoContent() {
 
                   {/* ── Barra de Meta Mensal no detalhe (real-time via allLeadsForDashboard) ── */}
                   {clienteAtivo.meta_leads_mensal != null && clienteAtivo.meta_leads_mensal > 0 && (() => {
-                    const now    = new Date();
-                    const inicio = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-                    const fim    = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-                    // Mesma lógica do useMemo leadsDoMesPorCliente: comparação ISO string, sem timezone drift
+                    const now = new Date();
+                    const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1);
+                    const mesFim    = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    mesFim.setHours(23, 59, 59, 999);
+                    // Conta apenas leads do mês corrente com DNA de lead válido
                     const leadsDoMesRealTime = allLeadsForDashboard.filter(l => {
-                      if (!l.data || l.data < inicio || l.data > fim) return false;
+                      const d = parseDMY(l.data ?? "");
+                      if (!d || d < mesInicio || d > mesFim) return false;
                       const plat = (l.plataforma ?? "").toLowerCase();
-                      // Meta Ads: só conta leads com meta_lead_id (form / messaging)
-                      if (plat.includes("meta") && !l.meta_lead_id) return false;
+                      const isMeta = plat.includes("meta");
+                      // Meta: apenas leads com meta_lead_id (messaging_first_reply/lead)
+                      if (isMeta && !l.meta_lead_id) return false;
                       return true;
                     }).length;
                     return (
