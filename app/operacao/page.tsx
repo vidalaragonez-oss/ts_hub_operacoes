@@ -3154,9 +3154,9 @@ function OperacaoContent() {
     setClienteAtivo(cliente); setLeadSearch(""); setPlatFilter("");
     const _fmtL=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; const _y=new Date(); _y.setDate(_y.getDate()-1); const _f=new Date(_y); _f.setDate(_f.getDate()-6);
     setDateFrom(_fmtL(_f)); setDateTo(_fmtL(_y)); setPeriodPreset("7d"); setCurrentPage(1);
-    fetchLeads(cliente.id);
-    // Auto-sync silencioso de leads Meta
     if (cliente.meta_ad_account_id && operacaoAtiva) {
+      // Quando há Meta configurado: o sync já faz fetchLeads internamente após upsert.
+      // Não chamamos fetchLeads separado para evitar race condition (fetch rápido sobrescreve sync).
       syncMetaLeads(
         cliente.id,
         cliente.meta_ad_account_id,
@@ -3164,6 +3164,9 @@ function OperacaoContent() {
         operacaoAtiva.id,
         operacaoAtiva.nome,
       );
+    } else {
+      // Sem Meta: carrega direto do banco
+      fetchLeads(cliente.id);
     }
     window.scrollTo({ top: 0, behavior: "smooth" }); // Sobe suavemente
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3476,6 +3479,7 @@ function OperacaoContent() {
   ) => {
     if (metaSyncRunning.current) return;
     metaSyncRunning.current = true;
+    setLeadsLoading(true);
     try {
       const params = new URLSearchParams({ action: "leads", account_id: accountId });
       if (token) params.set("token", token);
@@ -3529,7 +3533,18 @@ function OperacaoContent() {
         .from("leads")
         .upsert(rows, { onConflict: "meta_lead_id", ignoreDuplicates: false });
 
-      if (upsertError) throw upsertError;
+      if (upsertError) {
+        // Fallback: tenta insert ignorando duplicatas (funciona mesmo sem constraint UNIQUE)
+        console.warn("[syncMetaLeads] upsert falhou, tentando insert com ignoreDuplicates:", upsertError.message);
+        const { error: insertError } = await supabase
+          .from("leads")
+          .insert(rows)
+          .select();
+        if (insertError && !insertError.message.includes("duplicate")) {
+          toast.error(`Sync Meta falhou: ${insertError.message}`);
+          throw insertError;
+        }
+      }
 
       // FONTE ÚNICA: após upsert, recarrega TODOS os leads do banco para este cliente
       // Isso garante que allLeadsForDashboard, leadsDoMes e totalLeadsCount sejam precisos
@@ -3557,8 +3572,10 @@ function OperacaoContent() {
       toast.success(`${novosCount} lead(s) Meta sincronizado(s).`);
     } catch (err: unknown) {
       console.error("[syncMetaLeads] Erro:", err instanceof Error ? err.message : String(err));
+      toast.error(`Sync Meta: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
     } finally {
       metaSyncRunning.current = false;
+      setLeadsLoading(false);
     }
   };
 
