@@ -348,8 +348,7 @@ export async function GET(req: NextRequest) {
       const since     = searchParams.get("since");
       const until     = searchParams.get("until");
       // IDs de campanhas a ignorar (blacklist) — passados como JSON array no query param
-      const ignoreRaw = searchParams.get("ignore_ids");
-      const ignoredIds: string[] = ignoreRaw ? JSON.parse(ignoreRaw) : [];
+      const ignoredIds: string[] = searchParams.get("ignore_ids")?.split(",").filter(Boolean) ?? [];
       if (!accountId) return NextResponse.json({ error: "account_id obrigatório" }, { status: 400 });
 
       const accountData = await metaFetch(`/${accountId}`, {
@@ -491,8 +490,7 @@ export async function GET(req: NextRequest) {
       const since = searchParams.get("since");
       const until = searchParams.get("until");
       // IDs de campanhas a ignorar (blacklist)
-      const ignoreRaw = searchParams.get("ignore_ids");
-      const ignoredIds: string[] = ignoreRaw ? JSON.parse(ignoreRaw) : [];
+      const ignoredIds: string[] = searchParams.get("ignore_ids")?.split(",").filter(Boolean) ?? [];
       if (!accountId) return NextResponse.json({ error: "account_id obrigatório" }, { status: 400 });
 
       const accountData = await metaFetch(`/${accountId}`, { access_token: token, fields: "account_status,name,currency" });
