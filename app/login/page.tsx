@@ -82,8 +82,8 @@ export default function LoginPage() {
                 Sua operação sob controle total.
               </p>
               {/* Badge de acesso restrito */}
-              <span className="mt-1 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-[#2e2c29] bg-[#201f1d] text-[10px] font-semibold text-[#7a7268] tracking-widest uppercase">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500/60 inline-block"/>
+              <span className="mt-1 inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full border border-[#2e2c29] bg-[#201f1d] text-[10px] font-semibold text-[#7a7268] tracking-widest uppercase">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500/60 shrink-0 inline-block"/>
                 Acesso Restrito
               </span>
             </div>
