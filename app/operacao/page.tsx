@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useCallback, useRef, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
@@ -2868,8 +2868,9 @@ function normalizeCliente(raw: Record<string, unknown>): Cliente {
 // PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export default function Home() {
-  const router = useRouter();
+function OperacaoContent() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
 
   const [perfil, setPerfil]           = useState<GestorPerfil | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -3068,6 +3069,15 @@ export default function Home() {
       setOperacoesLoading(false);
     }
   };
+
+  // ── Abre modal de Nova Operação quando ?nova=1 está na URL ──────────────────
+  useEffect(() => {
+    if (!operacoesLoading && searchParams.get("nova") === "1") {
+      setNovaOpOpen(true);
+      // Limpa o parâmetro da URL sem recarregar a página
+      router.replace("/operacao");
+    }
+  }, [operacoesLoading, searchParams, router]);
 
   const fetchClientes = useCallback(async (operacaoId: string) => {
     setClientesLoading(true); setClientes([]);
@@ -4631,5 +4641,17 @@ export default function Home() {
         </button>
       )}
     </div>
+  );
+}
+
+export default function OperacaoPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#111010] flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-amber-500" />
+      </div>
+    }>
+      <OperacaoContent />
+    </Suspense>
   );
 }
