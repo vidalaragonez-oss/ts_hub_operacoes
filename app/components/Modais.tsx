@@ -571,7 +571,7 @@ export function ClienteModal({
   const [verbaThumbtack, setVerbaThumbtack] = useState<string>(initial?.verba_outros != null && (initial?.platforms ?? []).some(p => p.key === 'thumbtack') ? String(initial.verba_outros) : "");
   const [verbaOutros, setVerbaOutros]     = useState<string>(initial?.verba_outros   != null ? String(initial.verba_outros)   : "");
   const [glsAccountId, setGlsAccountId] = useState(initial?.gls_account_id ?? "");
-  const [moeda, setMoeda] = useState<'BRL' | 'USD'>(initial?.moeda ?? 'BRL');
+  const [moeda, setMoeda] = useState<'BRL' | 'USD'>(initial?.moeda ?? 'USD');
 
   const handleFetchAccounts = async () => {
     setMetaLoading(true);
