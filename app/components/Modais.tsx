@@ -112,6 +112,8 @@ export interface Cliente {
   meta_last_sync?:    string | null;
   // ── Blacklist de Campanhas (excluídas do cálculo de métricas) ─────────────
   meta_ignored_campaigns?: string[] | null;
+  // ── Input Express: Gasto manual de redes sem API ──────────────────────────
+  gasto_manual_outras_redes?: number | null;
 }
 
 export interface Lead {
@@ -580,6 +582,7 @@ export function ClienteModal({
   const [verbaNextdoor, setVerbaNextdoor] = useState<string>(initial?.verba_outros   != null && (initial?.platforms ?? []).some(p => p.key === 'nextdoor') ? String(initial.verba_outros) : "");
   const [verbaThumbtack, setVerbaThumbtack] = useState<string>(initial?.verba_outros != null && (initial?.platforms ?? []).some(p => p.key === 'thumbtack') ? String(initial.verba_outros) : "");
   const [verbaOutros, setVerbaOutros]     = useState<string>(initial?.verba_outros   != null ? String(initial.verba_outros)   : "");
+  const [gastoManual, setGastoManual]     = useState<string>(initial?.gasto_manual_outras_redes != null ? String(initial.gasto_manual_outras_redes) : "");
   const [glsAccountId, setGlsAccountId] = useState(initial?.gls_account_id ?? "");
   const [moeda, setMoeda] = useState<'BRL' | 'USD'>(initial?.moeda ?? 'USD');
 
@@ -705,6 +708,8 @@ export function ClienteModal({
       moeda,
       // Blacklist de campanhas ignoradas nas métricas
       meta_ignored_campaigns: ignoredCamps.length > 0 ? ignoredCamps : null,
+      // Input Express: gasto manual de redes sem API (Google/GLS/outras)
+      gasto_manual_outras_redes: gastoManual !== "" ? Number(gastoManual) : null,
     };
 
     setSaving(true);
@@ -1079,6 +1084,43 @@ export function ClienteModal({
                 </div>
               );
             })()}
+          </div>
+
+          {/* ── Input Express: Gasto Realizado (outras redes) ────────────────── */}
+          <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <div className="w-4 h-4 rounded bg-orange-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-[#7a7268] block mb-0.5">
+                  Gasto Realizado — Google / GLS / Outras
+                </label>
+                <p className="text-[10px] text-[#4a4844] leading-relaxed mb-3">
+                  Informe o gasto mensal acumulado das plataformas sem integração direta (Google Ads, GLS, etc.).
+                  Este valor é atualizado manualmente pelo gestor e compõe o Dashboard da Diretoria.
+                </p>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-orange-400 pointer-events-none select-none">
+                    {moeda === "USD" ? "US$" : "R$"}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={gastoManual}
+                    onChange={e => setGastoManual(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-[#201f1d] border border-orange-500/20 rounded-xl pl-9 pr-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-orange-500/50 transition-colors"
+                  />
+                </div>
+                {gastoManual !== "" && Number(gastoManual) > 0 && (
+                  <p className="text-[10px] text-orange-400/70 mt-1.5 font-medium">
+                    Aparecerá somado ao gasto Meta no Dashboard da Diretoria.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
             </div>
           )}
