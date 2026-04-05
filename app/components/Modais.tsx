@@ -27,9 +27,45 @@ import {
   Wifi,
   WifiOff,
   Search,
+  AlertTriangle,
+  Info,
+  Shield,
+  History,
+  RotateCcw,
+  Trash2,
+  Building2,
+  ShieldCheck,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UTILIDADE: LOG DE AUDITORIA
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function registrarLog(
+  userId: string,
+  userNome: string,
+  acao: string,
+  entidade: string,
+  entidadeId: string | null,
+  detalhes: string
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("audit_logs").insert({
+      user_id:    userId,
+      user_nome:  userNome,
+      acao,
+      entidade,
+      entidade_id: entidadeId,
+      detalhes,
+    });
+    if (error) console.error("[AuditLog] Erro ao registrar log:", error);
+  } catch (err) {
+    console.error("[AuditLog] Exceção ao registrar log:", err);
+  }
+}
 
 // ─── Tipos locais ─────────────────────────────────────────────────────────────
 
@@ -73,6 +109,15 @@ export interface Cliente {
   gls_account_id?:    string | null;
   // ── Moeda ─────────────────────────────────────────────────────────────────
   moeda?:             'BRL' | 'USD' | null;
+  // ── Cache de Métricas Meta (Background Sync) ──────────────────────────────
+  meta_spend_cache?:  number | null;
+  meta_leads_cache?:  number | null;
+  meta_cpl_cache?:    number | null;
+  meta_last_sync?:    string | null;
+  // ── Blacklist de Campanhas (excluídas do cálculo de métricas) ─────────────
+  meta_ignored_campaigns?: string[] | null;
+  // ── Input Express: Gasto manual de redes sem API ──────────────────────────
+  gasto_manual_outras_redes?: number | null;
 }
 
 export interface Lead {
@@ -87,6 +132,7 @@ export interface Lead {
   operacao_id?: string;
   created_at?: string;
   charge_status?: string;
+  meta_lead_id?: string | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -461,6 +507,7 @@ export function NovaOperacaoModal({ open, onClose, onSaved }: NovaOperacaoModalP
 // MODAL: NOVO / EDITAR CLIENTE
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
 export interface ClienteModalProps {
   mode: "new" | "edit";
   initial?: Cliente;
@@ -469,6 +516,8 @@ export interface ClienteModalProps {
   gestoresTrafego: string[];
   onSaved: (cliente: Cliente) => void;
   onClose: () => void;
+  initialTab?: "perfil" | "campanhas" | "financeiro" | "integracoes";
+  perfil?: { user_id: string; nome: string } | null;
 }
 
 export function ClienteModal({
@@ -476,7 +525,10 @@ export function ClienteModal({
   gestoresEstrat: gestoresEstratProp,
   gestoresTrafego: gestoresTrafegoProp,
   onSaved, onClose,
+  initialTab,
+  perfil,
 }: ClienteModalProps) {
+
 
   // Busca filtrada por ativo_na_selecao = true
   const {
@@ -516,6 +568,14 @@ export function ClienteModal({
   const metaSearchRef = useRef<HTMLInputElement>(null);
   const metaDropdownRef = useRef<HTMLDivElement>(null);
 
+  // ── Blacklist de Campanhas ──────────────────────────────────────────────────
+  const [ignoredCamps,     setIgnoredCamps]     = useState<string[]>(
+    Array.isArray(initial?.meta_ignored_campaigns) ? initial.meta_ignored_campaigns : []
+  );
+  const [campaignList,     setCampaignList]     = useState<{ id: string; name: string; status: string; objective: string }[]>([]);
+  const [campListLoading,  setCampListLoading]  = useState(false);
+  const [campListError,    setCampListError]    = useState<string | null>(null);
+
   // ── Metas, Orçamentos & IDs adicionais ─────────────────────────────────────
   const [metaLeadsMensal, setMetaLeadsMensal] = useState<string>(
     initial?.meta_leads_mensal != null ? String(initial.meta_leads_mensal) : ""
@@ -526,8 +586,9 @@ export function ClienteModal({
   const [verbaNextdoor, setVerbaNextdoor] = useState<string>(initial?.verba_outros   != null && (initial?.platforms ?? []).some(p => p.key === 'nextdoor') ? String(initial.verba_outros) : "");
   const [verbaThumbtack, setVerbaThumbtack] = useState<string>(initial?.verba_outros != null && (initial?.platforms ?? []).some(p => p.key === 'thumbtack') ? String(initial.verba_outros) : "");
   const [verbaOutros, setVerbaOutros]     = useState<string>(initial?.verba_outros   != null ? String(initial.verba_outros)   : "");
+  const [gastoManual, setGastoManual]     = useState<string>(initial?.gasto_manual_outras_redes != null ? String(initial.gasto_manual_outras_redes) : "");
   const [glsAccountId, setGlsAccountId] = useState(initial?.gls_account_id ?? "");
-  const [moeda, setMoeda] = useState<'BRL' | 'USD'>(initial?.moeda ?? 'BRL');
+  const [moeda, setMoeda] = useState<'BRL' | 'USD'>(initial?.moeda ?? 'USD');
 
   const handleFetchAccounts = async () => {
     setMetaLoading(true);
@@ -546,6 +607,26 @@ export function ClienteModal({
       toast.error(`Erro Meta Ads: ${(err as Error).message}`);
     } finally {
       setMetaLoading(false);
+    }
+  };
+
+  const handleFetchCampaigns = async () => {
+    if (!metaAccountId) { toast.error("Vincule uma conta Meta Ads antes de buscar campanhas."); return; }
+    setCampListLoading(true);
+    setCampListError(null);
+    try {
+      const params = new URLSearchParams({ action: "campaign_list", account_id: metaAccountId });
+      if (metaToken.trim()) params.set("token", metaToken.trim());
+      const res  = await fetch(`/api/meta?${params}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setCampaignList(json.campaigns ?? []);
+      if ((json.campaigns ?? []).length === 0) toast.warning("Nenhuma campanha encontrada para esta conta.");
+    } catch (err: unknown) {
+      setCampListError((err as Error).message);
+      toast.error(`Erro ao buscar campanhas: ${(err as Error).message}`);
+    } finally {
+      setCampListLoading(false);
     }
   };
 
@@ -629,6 +710,10 @@ export function ClienteModal({
       })(),
       gls_account_id:    glsAccountId.trim() || null,
       moeda,
+      // Blacklist de campanhas ignoradas nas métricas
+      meta_ignored_campaigns: ignoredCamps.length > 0 ? ignoredCamps : null,
+      // Input Express: gasto manual de redes sem API (Google/GLS/outras)
+      gasto_manual_outras_redes: gastoManual !== "" ? Number(gastoManual) : null,
     };
 
     setSaving(true);
@@ -646,6 +731,18 @@ export function ClienteModal({
         id: mode === "new" ? (result.data as Cliente).id : initial!.id,
       } as unknown as Cliente;
       toast.success(mode === "new" ? `${payload.nome} cadastrado!` : "Alterações salvas!");
+      if (perfil) {
+        await registrarLog(
+          perfil.user_id,
+          perfil.nome,
+          mode === "new" ? "CRIAR_CLIENTE" : "EDITAR_CLIENTE",
+          "clientes",
+          saved.id,
+          mode === "new"
+            ? `Gestor criou o cliente "${payload.nome}"`
+            : `Gestor alterou configurações do cliente "${payload.nome}"`
+        );
+      }
       onSaved(saved);
       onClose();
     } catch (err: unknown) {
@@ -654,6 +751,8 @@ export function ClienteModal({
       setSaving(false);
     }
   };
+
+  const [activeTab, setActiveTab] = useState<"perfil" | "campanhas" | "financeiro" | "integracoes">(initialTab ?? "perfil");
 
   return (
     <div
@@ -670,7 +769,6 @@ export function ClienteModal({
         style={{ maxHeight: "92dvh" }}
         onClick={e => e.stopPropagation()}
       >
-    
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#2e2c29] shrink-0 bg-[#111010]">
           <div>
@@ -691,11 +789,39 @@ export function ClienteModal({
           </button>
         </div>
 
+        {/* Tab Navigation */}
+        <div className="flex border-b border-[#2e2c29] bg-[#111010] shrink-0 px-1">
+          {(["perfil", "campanhas", "financeiro", "integracoes"] as const).map(tab => {
+            const labels: Record<string, string> = {
+              perfil: "Perfil",
+              campanhas: "Camps.",
+              financeiro: "Financeiro",
+              integracoes: "Integrações",
+            };
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={`px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-all whitespace-nowrap ${
+                  activeTab === tab
+                    ? "border-amber-500 text-amber-400"
+                    : "border-transparent text-[#4a4844] hover:text-[#7a7268]"
+                }`}
+              >
+                {labels[tab]}
+              </button>
+            );
+          })}
+        </div>
+
         {/* Body */}
         <div
           className="flex-1 overflow-y-auto px-5 py-5 space-y-5"
           style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}
         >
+          {activeTab === "perfil" && (
+            <div className="space-y-5">
           {/* Nome */}
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold uppercase tracking-widest text-[#7a7268]">Nome do Cliente</label>
@@ -757,7 +883,7 @@ export function ClienteModal({
                         ? "bg-amber-500 border-amber-400 text-[#111]"
                         : "bg-[#201f1d] border-[#2e2c29] text-[#7a7268]"
                     }`}>
-                    👤 {initial.gestor_estrategico} ↩
+                    <User size={12} className="inline-block mr-1" />{initial.gestor_estrategico} ↩
                   </button>
                )}
                 {gestoresEstrat.length === 0 && (
@@ -794,7 +920,11 @@ export function ClienteModal({
               </div>
             </div>
           )}
+            </div>
+          )}
 
+          {activeTab === "campanhas" && (
+            <div className="space-y-5">
           {/* Plataformas + Campanhas dinâmicas */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -862,8 +992,11 @@ export function ClienteModal({
               );
             })}
           </div>
+            </div>
+          )}
 
-
+          {activeTab === "financeiro" && (
+            <div className="space-y-5">
           {/* ── Metas & Orçamentos ──────────────────────────────────────────────── */}
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-4">
             <div className="flex items-center gap-2">
@@ -895,7 +1028,7 @@ export function ClienteModal({
                           : "bg-blue-500/15 border-blue-500/40 text-blue-400"
                         : "bg-[#201f1d] border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8] hover:border-[#7a7268]"
                     }`}>
-                    {c === 'BRL' ? '🇧🇷 R$ — Real' : '🇺🇸 US$ — Dólar'}
+                    {c === 'BRL' ? 'R$ — Real' : 'US$ — Dólar'}
                   </button>
                 ))}
               </div>
@@ -957,6 +1090,47 @@ export function ClienteModal({
             })()}
           </div>
 
+          {/* ── Input Express: Gasto Realizado (outras redes) ────────────────── */}
+          <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <div className="w-4 h-4 rounded bg-orange-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-[#7a7268] block mb-0.5">
+                  Gasto Realizado — Google / GLS / Outras
+                </label>
+                <p className="text-[10px] text-[#4a4844] leading-relaxed mb-3">
+                  Informe o gasto mensal acumulado das plataformas sem integração direta (Google Ads, GLS, etc.).
+                  Este valor é atualizado manualmente pelo gestor e compõe o Dashboard da Diretoria.
+                </p>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-orange-400 pointer-events-none select-none">
+                    {moeda === "USD" ? "US$" : "R$"}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={gastoManual}
+                    onChange={e => setGastoManual(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-[#201f1d] border border-orange-500/20 rounded-xl pl-9 pr-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-orange-500/50 transition-colors"
+                  />
+                </div>
+                {gastoManual !== "" && Number(gastoManual) > 0 && (
+                  <p className="text-[10px] text-orange-400/70 mt-1.5 font-medium">
+                    Aparecerá somado ao gasto Meta no Dashboard da Diretoria.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+            </div>
+          )}
+
+          {activeTab === "integracoes" && (
+            <div className="space-y-5">
           {/* ── IDs de Integração ────────────────────────────────────────────── */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -1133,7 +1307,7 @@ export function ClienteModal({
                                         ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/25"
                                         : "text-orange-400 bg-orange-500/10 border-orange-500/25"
                                     }`}>
-                                      {acc.status === 1 ? "ATIVA" : "⚠️"}
+                                      {acc.status === 1 ? "ATIVA" : "!"}
                                     </span>
                                     {isSelected && (
                                       <Check size={13} className="text-emerald-400" />
@@ -1191,28 +1365,141 @@ export function ClienteModal({
           </div>
 
           <div className="pb-2" />
+
+          {/* ── Blacklist de Campanhas ────────────────────────────────────── */}
+          {metaAccountId && (
+            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 space-y-3">
+              {/* Header */}
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-red-400 flex items-center gap-1.5">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                    Blacklist de Campanhas
+                  </p>
+                  <p className="text-[10px] text-[#7a7268] mt-0.5">
+                    Campanhas marcadas são excluídas do Gasto, Leads e CPL.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleFetchCampaigns}
+                  disabled={campListLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap shrink-0"
+                >
+                  {campListLoading
+                    ? <><Loader2 size={11} className="animate-spin" /> Buscando...</>
+                    : <><RefreshCw size={11} /> Buscar Campanhas</>}
+                </button>
+              </div>
+
+              {/* Aviso sobre ignoradas já salvas (sem ter buscado ainda) */}
+              {ignoredCamps.length > 0 && campaignList.length === 0 && !campListLoading && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-red-400 shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <p className="text-[10px] text-red-300">
+                    <span className="font-bold">{ignoredCamps.length}</span> campanha{ignoredCamps.length !== 1 ? "s" : ""} ignorada{ignoredCamps.length !== 1 ? "s" : ""} salva{ignoredCamps.length !== 1 ? "s" : ""}. Clique em "Buscar Campanhas" para gerenciar.
+                  </p>
+                </div>
+              )}
+
+              {/* Erro */}
+              {campListError && (
+                <p className="text-[10px] text-red-400 font-semibold">{campListError}</p>
+              )}
+
+              {/* Lista de campanhas */}
+              {campaignList.length > 0 && (
+                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
+                  {campaignList.map(camp => {
+                    const isIgnored = ignoredCamps.includes(camp.id);
+                    const isActive  = camp.status === "ACTIVE";
+                    return (
+                      <button
+                        key={camp.id}
+                        type="button"
+                        onClick={() => setIgnoredCamps(prev =>
+                          isIgnored ? prev.filter(id => id !== camp.id) : [...prev, camp.id]
+                        )}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all ${
+                          isIgnored
+                            ? "border-red-500/40 bg-red-500/10"
+                            : "border-[#2e2c29] bg-[#111010] hover:border-[#3a3835]"
+                        }`}
+                      >
+                        {/* Checkbox visual */}
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                          isIgnored ? "bg-red-500 border-red-500" : "border-[#3a3835]"
+                        }`}>
+                          {isIgnored && (
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round"><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/><line x1="19.07" y1="4.93" x2="4.93" y2="19.07"/></svg>
+                          )}
+                        </div>
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs font-semibold truncate ${isIgnored ? "text-red-300 line-through opacity-70" : "text-[#e8e2d8]"}`}>
+                            {camp.name}
+                          </p>
+                          <p className="text-[9px] text-[#4a4844] font-mono mt-0.5">{camp.id}</p>
+                        </div>
+                        {/* Status badge */}
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border shrink-0 ${
+                          isActive
+                            ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/25"
+                            : "text-[#7a7268] bg-[#2e2c29] border-[#3a3835]"
+                        }`}>
+                          {isActive ? "ATIVA" : "PAUSADA"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Resumo de ignoradas */}
+              {campaignList.length > 0 && (
+                <p className={`text-[10px] font-semibold ${ignoredCamps.length > 0 ? "text-red-400" : "text-[#4a4844]"}`}>
+                  {ignoredCamps.length > 0
+                    ? `${ignoredCamps.length} campanha${ignoredCamps.length !== 1 ? "s" : ""} ignorada${ignoredCamps.length !== 1 ? "s" : ""} — excluída${ignoredCamps.length !== 1 ? "s" : ""} do cálculo de métricas.`
+                    : "Nenhuma campanha ignorada. Todas entram no cálculo."}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="pb-2" />
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="shrink-0 px-5 py-4 border-t border-[#2e2c29] flex gap-3 bg-[#111010]">
           <button onClick={onClose}
             className="flex-1 py-2.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-sm font-semibold hover:text-[#e8e2d8] transition-colors">
-             Cancelar
+            Cancelar
           </button>
-            <button onClick={handleSave} disabled={saving}
-                className="flex-1 py-2.5 rounded-xl bg-amber-500 text-[#111] text-sm font-bold hover:bg-amber-400 active:scale-95 transition-all shadow-[0_4px_16px_rgba(245,166,35,0.3)] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2">
-                {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} className="fill-current" />}
-                {saving ? "Salvando..." : mode === "new" ? "Cadastrar" : "Salvar"}
-              </button>
-            </div>
-          </motion.div>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-2.5 rounded-xl bg-amber-500 text-[#111] text-sm font-bold hover:bg-amber-400 active:scale-95 transition-all shadow-[0_4px_16px_rgba(245,166,35,0.3)] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} className="fill-current" />}
+            {saving ? "Salvando..." : mode === "new" ? "Cadastrar" : "Salvar"}
+          </button>
         </div>
+      </motion.div>
+    </div>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MODAL: SETTINGS (Gestores)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+export interface OperacaoSimples { id: string; nome: string; }
+export interface GestorAcesso {
+  id: string; nome: string;
+  role: "admin" | "gestor";
+  user_id: string;
+  operacao_id: string[] | null;
+}
 
 export interface SettingsModalProps {
   open: boolean;
@@ -1225,6 +1512,12 @@ export interface SettingsModalProps {
   onRenameTrafego: (o: string, n: string) => Promise<void>;
   onDeleteTrafego: (n: string) => Promise<void>;
   onAddTrafego:    (n: string) => Promise<void>;
+  // Novas props para Unidades e Acessos
+  operacoes?:          OperacaoSimples[];
+  onDeleteOperacao?:   (id: string) => Promise<void>;
+  onRefreshOperacoes?: () => Promise<void>;
+  // Guard: somente admin logado pode alterar acessos
+  isCallerAdmin?: boolean;
 }
 
 export function SettingsModal({
@@ -1232,17 +1525,87 @@ export function SettingsModal({
   gestoresEstrat, gestoresTrafego,
   onRenameEstrat, onDeleteEstrat, onAddEstrat,
   onRenameTrafego, onDeleteTrafego, onAddTrafego,
+  operacoes = [], onDeleteOperacao, onRefreshOperacoes,
+  isCallerAdmin = false,
 }: SettingsModalProps) {
-  type Tab = "estrategico" | "trafego";
+  type Tab = "estrategico" | "trafego" | "unidades" | "acessos";
   const [tab, setTab]         = useState<Tab>("estrategico");
   const [editing, setEditing] = useState<{ idx: number; val: string } | null>(null);
   const [newVal, setNewVal]   = useState("");
   const [busy, setBusy]       = useState(false);
 
-  useEffect(() => {
-    if (open) { setEditing(null); setNewVal(""); setTab("estrategico"); }
-  }, [open]);
+  // ── Gestores de Acesso ───────────────────────────────────────────────────────
+  const [gestoresAcesso, setGestoresAcesso] = useState<GestorAcesso[]>([]);
+  const [acessoLoading, setAcessoLoading]   = useState(false);
+  const [acessoBusy, setAcessoBusy]         = useState<string | null>(null);
 
+  const fetchGestoresAcesso = useCallback(async () => {
+    setAcessoLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("gestores")
+        .select("id, nome, role, user_id, operacao_id")
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      setGestoresAcesso((data ?? []) as GestorAcesso[]);
+    } catch (err) {
+      toast.error(`Erro ao carregar usuários: ${err instanceof Error ? err.message : "Erro"}`);
+    } finally {
+      setAcessoLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) { setEditing(null); setNewVal(""); setTab("estrategico"); fetchGestoresAcesso(); }
+  }, [open, fetchGestoresAcesso]);
+
+  // Recarrega acessos quando operações mudam (nova op criada) e aba está visível
+  useEffect(() => {
+    if (open && tab === "acessos") fetchGestoresAcesso();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operacoes.length]);
+
+  // ── Toggle de operação para um gestor ───────────────────────────────────────
+  const handleToggleOpAcesso = async (gestor: GestorAcesso, opId: string) => {
+    if (gestor.role === "admin") return;
+    // Somente admin logado pode alterar acessos
+    if (!isCallerAdmin) {
+      toast.error("Sem permissão para alterar acessos.");
+      return;
+    }
+    const current = gestor.operacao_id ?? [];
+    const next = current.includes(opId)
+      ? current.filter(id => id !== opId)
+      : [...current, opId];
+    setAcessoBusy(gestor.id);
+    try {
+      // Usa createBrowserClient para carregar a sessão autenticada do cookie,
+      // garantindo que as políticas RLS do Supabase aceitem o UPDATE.
+      const { createBrowserClient } = await import("@supabase/ssr");
+      const sbAuth = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+      const { error } = await sbAuth
+        .from("gestores")
+        .update({ operacao_id: next.length > 0 ? next : null })
+        .eq("id", gestor.id);
+      if (error) throw error;
+      // Sincroniza estado local sem precisar de F5
+      setGestoresAcesso(prev =>
+        prev.map(g => g.id === gestor.id
+          ? { ...g, operacao_id: next.length > 0 ? next : null }
+          : g)
+      );
+      toast.success(`Acesso de ${gestor.nome} atualizado`);
+    } catch (err) {
+      toast.error(`Erro: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
+    } finally {
+      setAcessoBusy(null);
+    }
+  };
+
+  // ── Gestores de names (estratégico / tráfego) ────────────────────────────────
   const isEstrat = tab === "estrategico";
   const list     = isEstrat ? gestoresEstrat : gestoresTrafego;
   const onRename = isEstrat ? onRenameEstrat  : onRenameTrafego;
@@ -1266,23 +1629,48 @@ export function SettingsModal({
     toast.success(`"${trimmed}" adicionado!`);
   };
 
-  const handleDelete = async (name: string) => {
+  const handleDeleteGestor = async (name: string) => {
     if (!confirm(`Remover "${name}"?`)) return;
-    setBusy(true);
-    await onDelete(name); setBusy(false);
+    setBusy(true); await onDelete(name); setBusy(false);
     toast.success(`"${name}" removido.`);
   };
+
+  // ── Deletar operação ─────────────────────────────────────────────────────────
+  const handleDeleteOperacao = async (op: OperacaoSimples) => {
+    if (!confirm(
+      `Deseja excluir a unidade "${op.nome}"?\n\nIsso não afetará os clientes, mas eles ficarão sem unidade atribuída.`
+    )) return;
+    if (!onDeleteOperacao) return;
+    setBusy(true);
+    try {
+      await onDeleteOperacao(op.id);
+      toast.success(`Unidade "${op.nome}" excluída.`);
+      if (onRefreshOperacoes) await onRefreshOperacoes();
+    } catch (err) {
+      toast.error(`Erro: ${err instanceof Error ? err.message : "Erro"}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const TAB_DEFS: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    { key: "estrategico", label: "Estratégicos", icon: <Users    size={12} /> },
+    { key: "trafego",     label: "Tráfego",      icon: <Layers   size={12} /> },
+    { key: "unidades",    label: "Unidades",     icon: <Building2 size={12} /> },
+    { key: "acessos",     label: "Acessos",      icon: <ShieldCheck size={12} /> },
+  ];
 
   return (
     <Dialog.Root open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[100]" style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }} />
         <Dialog.Content className="fixed z-[101] inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center" onInteractOutside={onClose}>
-            <motion.div 
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="w-full sm:max-w-md bg-[#1a1917] border border-[#2e2c29] rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: "90dvh" }}
-            >
+          <motion.div
+            initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+            className="w-full sm:max-w-lg bg-[#1a1917] border border-[#2e2c29] rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
+            style={{ maxHeight: "90dvh" }}
+          >
+            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#2e2c29] shrink-0">
               <Dialog.Title className="font-bold text-[#e8e2d8] flex items-center gap-2">
                 <Settings size={18} className="text-amber-500" /> Configurações Globais
@@ -1293,88 +1681,199 @@ export function SettingsModal({
                 </button>
               </Dialog.Close>
             </div>
-            <div className="flex gap-1 px-5 pt-4 shrink-0">
-              {(["estrategico", "trafego"] as Tab[]).map(t => (
-                <button key={t} onClick={() => { setTab(t); setEditing(null); setNewVal(""); }}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                    tab === t ? "bg-amber-500 text-[#111]" : "bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8]"
+
+            {/* Tabs */}
+            <div className="flex gap-1 px-5 pt-4 pb-1 shrink-0 overflow-x-auto no-scrollbar">
+              {TAB_DEFS.map(t => (
+                <button key={t.key}
+                  onClick={() => { setTab(t.key); setEditing(null); setNewVal(""); }}
+                  className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 ${
+                    tab === t.key ? "bg-amber-500 text-[#111]" : "bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8]"
                   }`}>
-                  {t === "estrategico" ? <><Users size={14} /> Estratégicos</> : <><Layers size={14} /> Tráfego</>}
+                  {t.icon}{t.label}
                 </button>
               ))}
             </div>
+
+            {/* Content */}
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#7a7268] mb-3">
-                 {list.length} gestor{list.length !== 1 ? "es" : ""} cadastrado{list.length !== 1 ? "s" : ""}
-              </p>
-              {list.length === 0 && (
-                <div className="flex items-center justify-center py-8 text-[#7a7268] text-sm">Nenhum gestor cadastrado.</div>
-              )}
-              {list.map((name, idx) => (
-                 <div key={name} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-colors ${
-                  editing?.idx === idx ? "border-amber-500/50 bg-amber-500/5" : "border-[#2e2c29] bg-[#201f1d]"
-                }`}>
-                  {editing?.idx === idx ? (
-                    <>
-                       <input autoFocus value={editing.val}
-                        onChange={e => setEditing({ idx, val: e.target.value })}
-                        onKeyDown={e => { if (e.key === "Enter") handleSaveEdit(name); if (e.key === "Escape") setEditing(null); }}
-                        className="flex-1 bg-transparent text-sm text-[#e8e2d8] outline-none min-w-0"/>
-                      <button onClick={() => handleSaveEdit(name)} disabled={busy}
-                        className="px-2.5 py-1 rounded-lg bg-amber-500 text-[#111] text-xs font-bold hover:bg-amber-400 transition-colors shrink-0 disabled:opacity-50">
-                         {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                      </button>
-                      <button onClick={() => setEditing(null)}
-                        className="px-2.5 py-1 rounded-lg bg-[#2e2c29] text-[#7a7268] text-xs hover:text-[#e8e2d8] transition-colors shrink-0">
-                        <X size={14} />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="flex-1 text-sm font-medium text-[#e8e2d8] truncate">{name}</span>
-                      <button onClick={() => setEditing({ idx, val: name })}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-[#2e2c29] text-[#7a7268] hover:text-amber-400 hover:bg-amber-500/10 transition-colors shrink-0">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                        </svg>
-                      </button>
-                      <button onClick={() => handleDelete(name)} disabled={busy}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-[#2e2c29] text-[#7a7268] hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 disabled:opacity-50">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                           <polyline points="3 6 5 6 21 6"/>
-                          <path d="M19 6l-1 14H6L5 6"/>
-                          <path d="M10 11v6"/><path d="M14 11v6"/>
-                          <path d="M9 6V4h6v2"/>
-                        </svg>
-                      </button>
-                    </>
+
+              {/* ── Gestores (Estratégico / Tráfego) ── */}
+              {(tab === "estrategico" || tab === "trafego") && (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#7a7268] mb-3">
+                    {list.length} gestor{list.length !== 1 ? "es" : ""} cadastrado{list.length !== 1 ? "s" : ""}
+                  </p>
+                  {list.length === 0 && (
+                    <div className="flex items-center justify-center py-8 text-[#7a7268] text-sm">Nenhum gestor cadastrado.</div>
                   )}
-                </div>
-              ))}
-              <div className="flex gap-2 pt-2">
-                <input type="text" value={newVal} onChange={e => setNewVal(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
-                  placeholder={isEstrat ? "Ex: João Silva" : "Ex: MR"}
-                  className="flex-1 bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-amber-500/60 transition-colors"/>
-                <button onClick={handleAdd} disabled={!newVal.trim() || busy}
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 text-[#111] text-sm font-bold hover:bg-amber-400 active:scale-95 transition-all disabled:opacity-40 disabled:pointer-events-none shrink-0 flex items-center gap-1.5">
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  Add
-                </button>
-              </div>
-              <p className="text-[10px] text-[#7a7268] pt-1 leading-relaxed">
-                <span className="text-amber-500/70">✦</span> Ao renomear, todos os clientes vinculados são atualizados em cascata.
-              </p>
-              <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 mt-2">
-                <p className="text-[10px] text-blue-400/80 leading-relaxed">
-                  <span className="font-bold">ℹ️</span> Apenas gestores com{" "}
-                  <code className="bg-blue-500/10 px-1 rounded text-[9px]">ativo_na_selecao = true</code>{" "}
-                  aparecem nos dropdowns de cadastro. Configure pelo Supabase.
-                </p>
-              </div>
+                  {list.map((name, idx) => (
+                    <div key={name} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-colors ${
+                      editing?.idx === idx ? "border-amber-500/50 bg-amber-500/5" : "border-[#2e2c29] bg-[#201f1d]"
+                    }`}>
+                      {editing?.idx === idx ? (
+                        <>
+                          <input autoFocus value={editing.val}
+                            onChange={e => setEditing({ idx, val: e.target.value })}
+                            onKeyDown={e => { if (e.key === "Enter") handleSaveEdit(name); if (e.key === "Escape") setEditing(null); }}
+                            className="flex-1 bg-transparent text-sm text-[#e8e2d8] outline-none min-w-0"/>
+                          <button onClick={() => handleSaveEdit(name)} disabled={busy}
+                            className="px-2.5 py-1 rounded-lg bg-amber-500 text-[#111] text-xs font-bold hover:bg-amber-400 transition-colors shrink-0 disabled:opacity-50">
+                            {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                          </button>
+                          <button onClick={() => setEditing(null)}
+                            className="px-2.5 py-1 rounded-lg bg-[#2e2c29] text-[#7a7268] text-xs hover:text-[#e8e2d8] transition-colors shrink-0">
+                            <X size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="flex-1 text-sm font-medium text-[#e8e2d8] truncate">{name}</span>
+                          <button onClick={() => setEditing({ idx, val: name })}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-[#2e2c29] text-[#7a7268] hover:text-amber-400 hover:bg-amber-500/10 transition-colors shrink-0">
+                            <Pencil size={12} />
+                          </button>
+                          <button onClick={() => handleDeleteGestor(name)} disabled={busy}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-[#2e2c29] text-[#7a7268] hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 disabled:opacity-50">
+                            <Trash2 size={12} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex gap-2 pt-2">
+                    <input type="text" value={newVal} onChange={e => setNewVal(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
+                      placeholder={isEstrat ? "Ex: João Silva" : "Ex: MR"}
+                      className="flex-1 bg-[#201f1d] border border-[#2e2c29] rounded-xl px-4 py-2.5 text-sm text-[#e8e2d8] placeholder:text-[#4a4844] outline-none focus:border-amber-500/60 transition-colors"/>
+                    <button onClick={handleAdd} disabled={!newVal.trim() || busy}
+                      className="px-4 py-2.5 rounded-xl bg-amber-500 text-[#111] text-sm font-bold hover:bg-amber-400 active:scale-95 transition-all disabled:opacity-40 disabled:pointer-events-none shrink-0 flex items-center gap-1.5">
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                      Add
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-[#7a7268] pt-1 leading-relaxed flex items-center gap-1">
+                    <Sparkles size={11} className="text-amber-500/70 shrink-0" /> Ao renomear, todos os clientes vinculados são atualizados em cascata.
+                  </p>
+                </>
+              )}
+
+              {/* ── Unidades (CRUD de Operações) ── */}
+              {tab === "unidades" && (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#7a7268] mb-3">
+                    {operacoes.length} unidade{operacoes.length !== 1 ? "s" : ""} cadastrada{operacoes.length !== 1 ? "s" : ""}
+                  </p>
+                  {operacoes.length === 0 && (
+                    <div className="flex items-center justify-center py-8 text-[#7a7268] text-sm">Nenhuma unidade cadastrada.</div>
+                  )}
+                  {operacoes.map(op => (
+                    <div key={op.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[#2e2c29] bg-[#201f1d]">
+                      <Building2 size={14} className="text-amber-500/70 shrink-0" />
+                      <span className="flex-1 text-sm font-medium text-[#e8e2d8] truncate">{op.nome}</span>
+                      <button
+                        onClick={() => handleDeleteOperacao(op)}
+                        disabled={busy}
+                        title={`Excluir unidade "${op.nome}"`}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-[#2e2c29] text-[#7a7268] hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 disabled:opacity-50"
+                      >
+                        {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                      </button>
+                    </div>
+                  ))}
+                  <div className="rounded-xl border border-amber-500/15 bg-amber-500/5 px-3 py-2.5 mt-2">
+                    <p className="text-[10px] text-amber-400/70 leading-relaxed">
+                      Para criar uma nova unidade, use o botão <strong>+ Nova Operação</strong> no Portal de Operações.
+                      Excluir uma unidade não remove os clientes vinculados a ela.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* ── Acessos (Vínculo de usuários às operações) ── */}
+              {tab === "acessos" && (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#7a7268] mb-3">
+                    Permissões por usuário
+                  </p>
+                  {acessoLoading && (
+                    <div className="flex items-center justify-center py-8 gap-2 text-[#7a7268]">
+                      <Loader2 size={16} className="animate-spin" />
+                      <span className="text-sm">Carregando usuários...</span>
+                    </div>
+                  )}
+                  {!acessoLoading && gestoresAcesso.length === 0 && (
+                    <div className="flex items-center justify-center py-8 text-[#7a7268] text-sm">Nenhum usuário encontrado.</div>
+                  )}
+                  {!acessoLoading && gestoresAcesso.map(gestor => {
+                    const isAdmin = gestor.role === "admin";
+                    const opIds   = gestor.operacao_id ?? [];
+                    const isBusy  = acessoBusy === gestor.id;
+                    return (
+                      <div key={gestor.id} className="rounded-xl border border-[#2e2c29] bg-[#201f1d] overflow-hidden">
+                        {/* Cabeçalho do gestor */}
+                        <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-[#2a2826]">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            isAdmin ? "bg-violet-500/20" : "bg-amber-500/15"
+                          }`}>
+                            <UserCheck size={13} className={isAdmin ? "text-violet-400" : "text-amber-400"} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-[#e8e2d8] truncate">{gestor.nome}</p>
+                            <p className={`text-[9px] font-bold uppercase tracking-wider ${
+                              isAdmin ? "text-violet-400" : "text-[#4a4844]"
+                            }`}>{isAdmin ? "Admin" : "Gestor"}</p>
+                          </div>
+                          {isBusy && <Loader2 size={13} className="animate-spin text-amber-400 shrink-0" />}
+                        </div>
+                        {/* Checkboxes de operações */}
+                        <div className="px-3 py-2.5 flex flex-wrap gap-2">
+                          {operacoes.length === 0 && (
+                            <p className="text-[10px] text-[#4a4844] italic">Nenhuma unidade cadastrada.</p>
+                          )}
+                          {operacoes.map(op => {
+                            const checked = isAdmin || opIds.includes(op.id);
+                            return (
+                              <button
+                                key={op.id}
+                                disabled={isAdmin || isBusy}
+                                onClick={() => handleToggleOpAcesso(gestor, op.id)}
+                                title={isAdmin ? "Admin tem acesso a todas as unidades" : `${checked ? "Remover" : "Dar"} acesso a ${op.nome}`}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all
+                                  ${checked
+                                    ? isAdmin
+                                      ? "bg-violet-500/15 border-violet-500/30 text-violet-300 cursor-default"
+                                      : "bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+                                    : "bg-[#1a1917] border-[#2e2c29] text-[#4a4844] hover:border-[#3a3835] hover:text-[#7a7268]"
+                                  } disabled:cursor-not-allowed`}
+                              >
+                                <div className={`w-3 h-3 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                  checked
+                                    ? isAdmin ? "bg-violet-500 border-violet-400" : "bg-amber-500 border-amber-400"
+                                    : "border-[#3a3835]"
+                                }`}>
+                                  {checked && <Check size={8} strokeWidth={3} className={isAdmin ? "text-white" : "text-[#111]"} />}
+                                </div>
+                                {op.nome}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 px-3 py-2.5 mt-1">
+                    <p className="text-[10px] text-blue-400/70 leading-relaxed">
+                      Admins têm acesso a todas as unidades automaticamente. Alterações de acesso entram em vigor no próximo login do usuário.
+                    </p>
+                  </div>
+                </>
+              )}
+
               <div className="pb-1" />
             </div>
+
+            {/* Footer */}
             <div className="shrink-0 px-5 py-4 border-t border-[#2e2c29]">
               <Dialog.Close asChild>
                 <button className="w-full py-2.5 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-sm font-semibold hover:text-[#e8e2d8] transition-colors">Fechar</button>
@@ -1386,6 +1885,7 @@ export function SettingsModal({
     </Dialog.Root>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DIALOG: NOVO LEAD MANUAL
@@ -1591,7 +2091,7 @@ export function ReportBugModal({
       });
       if (error) throw error;
 
-      toast.success("Bug reportado com sucesso! Obrigado pelo feedback. 🐛");
+      toast.success("Bug reportado com sucesso! Obrigado pelo feedback.");
       setDescricao("");
       setImageFile(null);
       setImagePreview(null);
@@ -1802,7 +2302,7 @@ export function AdminBugsModal({
         prev.map((b) => (b.id === id ? { ...b, status: newStatus } : b))
       );
       toast.success(
-        newStatus === "resolvido" ? "Bug marcado como resolvido ✅" : "Bug reaberto"
+        newStatus === "resolvido" ? "Bug marcado como resolvido" : "Bug reaberto"
       );
     } catch (err: unknown) {
       toast.error(
@@ -2062,5 +2562,212 @@ function BugCard({
         </div>
       )}
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODAL: PAINEL DE AUDITORIA (somente admin)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface AuditLog {
+  id: string;
+  user_id: string;
+  user_nome: string;
+  acao: string;
+  entidade: string;
+  entidade_id: string | null;
+  detalhes: string;
+  created_at: string;
+}
+
+const ACAO_STYLE: Record<string, { badge: string; dot: string }> = {
+  CRIAR_CLIENTE:   { badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",  dot: "bg-emerald-500"  },
+  EDITAR_CLIENTE:  { badge: "bg-blue-500/15 text-blue-400 border-blue-500/30",           dot: "bg-blue-500"     },
+  EXCLUIR_CLIENTE: { badge: "bg-red-500/15 text-red-400 border-red-500/30",              dot: "bg-red-500"      },
+  MUDAR_STATUS:    { badge: "bg-amber-500/15 text-amber-400 border-amber-500/30",        dot: "bg-amber-500"    },
+  EXCLUIR_LEADS:   { badge: "bg-red-500/15 text-red-400 border-red-500/30",              dot: "bg-red-400"      },
+  DEFAULT:         { badge: "bg-[#2e2c29] text-[#7a7268] border-[#3a3835]",             dot: "bg-[#7a7268]"    },
+};
+
+function getAcaoStyle(acao: string) {
+  return ACAO_STYLE[acao] ?? ACAO_STYLE.DEFAULT;
+}
+
+export function AuditLogsModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [logs, setLogs]       = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchLogs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("audit_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      setLogs((data as AuditLog[]) ?? []);
+    } catch (err: unknown) {
+      toast.error(`Erro ao carregar logs: ${err instanceof Error ? err.message : "Erro desconhecido"}`);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) fetchLogs();
+  }, [open, fetchLogs]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative w-full max-w-3xl bg-[#1a1917] border border-[#2e2c29] rounded-2xl shadow-2xl shadow-black/70 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-300 flex flex-col max-h-[88vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2e2c29] shrink-0 bg-[#111010]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
+              <Shield size={15} className="text-violet-400" />
+            </div>
+            <div>
+              <p className="text-[0.6rem] font-bold uppercase tracking-[0.18em] text-violet-400 mb-0.5">Governança</p>
+              <h2 className="text-sm font-bold text-[#e8e2d8] flex items-center gap-2">
+                <History size={13} className="text-[#7a7268]" /> Audit Trail — Últimas 100 ações
+              </h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchLogs}
+              disabled={loading}
+              title="Recarregar logs"
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] hover:text-violet-400 hover:border-violet-500/40 transition-colors disabled:opacity-40"
+            >
+              {loading
+                ? <Loader2 size={14} className="animate-spin" />
+                : <RotateCcw size={14} />}
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] hover:text-[#e8e2d8] transition-colors"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        {/* Contagem */}
+        {!loading && (
+          <div className="px-5 py-2.5 border-b border-[#2e2c29] bg-[#161514] shrink-0 flex items-center gap-2">
+            <Activity size={11} className="text-violet-400" />
+            <span className="text-[10px] font-semibold text-[#7a7268]">
+              {logs.length} registro{logs.length !== 1 ? "s" : ""} encontrado{logs.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <div className="w-8 h-8 rounded-full border-2 border-violet-500/20 border-t-violet-500 animate-spin" />
+              <p className="text-[#7a7268] text-sm">Buscando registros...</p>
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <Shield size={36} className="text-[#2e2c29]" />
+              <p className="text-[#7a7268] text-sm">Nenhuma ação registrada ainda.</p>
+            </div>
+          ) : (
+            <>
+              {/* Cabeçalho da tabela — só em desktop */}
+              <div className="hidden sm:grid grid-cols-[140px_120px_130px_1fr] gap-3 px-5 py-2 border-b border-[#2e2c29] bg-[#111010] shrink-0">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Data / Hora</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Usuário</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Ação</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-[#4a4844]">Detalhes</span>
+              </div>
+
+              <div className="divide-y divide-[#1e1c1a]">
+                {logs.map((log) => {
+                  const style = getAcaoStyle(log.acao);
+                  const dt = new Date(log.created_at);
+                  const dataHora = dt.toLocaleString("pt-BR", {
+                    day:    "2-digit",
+                    month:  "2-digit",
+                    year:   "numeric",
+                    hour:   "2-digit",
+                    minute: "2-digit",
+                  });
+
+                  return (
+                    <div
+                      key={log.id}
+                      className="px-5 py-3 hover:bg-[#1e1c1a]/60 transition-colors"
+                    >
+                      {/* Desktop: grid de 4 colunas */}
+                      <div className="hidden sm:grid grid-cols-[140px_120px_130px_1fr] gap-3 items-start">
+                        {/* Data/Hora */}
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-0.5 ${style.dot}`} />
+                          <span className="text-[10px] text-[#7a7268] font-mono">{dataHora}</span>
+                        </div>
+
+                        {/* Usuário */}
+                        <span className="text-xs font-semibold text-[#c8c0b4] truncate">{log.user_nome}</span>
+
+                        {/* Ação */}
+                        <span className={`inline-flex items-center self-start px-2 py-0.5 rounded-lg text-[9px] font-bold border tracking-wide ${style.badge}`}>
+                          {log.acao.replace(/_/g, " ")}
+                        </span>
+
+                        {/* Detalhes */}
+                        <span className="text-xs text-[#7a7268] leading-relaxed">{log.detalhes}</span>
+                      </div>
+
+                      {/* Mobile: card compacto */}
+                      <div className="sm:hidden space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[9px] font-bold border tracking-wide ${style.badge}`}>
+                            {log.acao.replace(/_/g, " ")}
+                          </span>
+                          <span className="text-[10px] text-[#4a4844] font-mono">{dataHora}</span>
+                        </div>
+                        <p className="text-xs font-semibold text-[#c8c0b4]">{log.user_nome}</p>
+                        <p className="text-xs text-[#7a7268] leading-relaxed">{log.detalhes}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="shrink-0 px-5 py-3.5 border-t border-[#2e2c29] bg-[#111010] flex items-center justify-between">
+          <p className="text-[10px] text-[#4a4844]">
+            Registros ordenados do mais recente para o mais antigo.
+          </p>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-[#201f1d] border border-[#2e2c29] text-[#7a7268] text-xs font-semibold hover:text-[#e8e2d8] transition-colors"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
