@@ -3829,6 +3829,12 @@ export default function Home() {
                     <button onClick={()=>setNovaOpOpen(true)} title="Nova Operação"
                       className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-xl bg-[#201f1d] border border-dashed border-[#3a3835] text-[#7a7268] hover:text-amber-400 hover:border-amber-500/40 transition-all text-sm font-bold">+</button>
                   )}
+                  {isAdmin && (
+                    <button onClick={()=>router.push("/diretoria")} title="Dashboard da Diretoria"
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 hover:border-violet-500/50 transition-all">
+                      📊 <span className="hidden lg:inline">Diretoria</span>
+                    </button>
+                  )}
                 </div>
                 <div className={`sm:hidden relative ${operacoes.length <= 1 ? "hidden" : ""}`}>
                   <button onClick={()=>setOpDropdownOpen(v=>!v)}
@@ -3848,6 +3854,12 @@ export default function Home() {
                         <button onClick={()=>{setNovaOpOpen(true);setOpDropdownOpen(false);}}
                           className="w-full text-left px-4 py-2.5 text-xs font-semibold text-amber-400 hover:bg-[#2e2c29] border-t border-[#2e2c29] transition-colors flex items-center gap-2">
                           <Plus size={14} /> Nova Operação
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button onClick={()=>{router.push("/diretoria");setOpDropdownOpen(false);}}
+                          className="w-full text-left px-4 py-2.5 text-xs font-semibold text-violet-400 hover:bg-[#2e2c29] border-t border-[#2e2c29] transition-colors flex items-center gap-2">
+                          📊 Dashboard Diretoria
                         </button>
                       )}
                     </div>
